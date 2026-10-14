@@ -2,6 +2,8 @@
 
 给**引擎使用者**的工具箱 —— 不用改引擎源码，就能让 agent 替你搭实验、盯设备、发数据、审扩展。
 
+> **从零开始做实验（完整教学）**：[`docs/TUTORIAL.md`](docs/TUTORIAL.md) —— 空工作区 → 接工具 → 开引擎 → 对 agent 说需求 → 拿到 `project/`（设计）与 `rst/`（成品）。
+
 引擎本身（渲染器、编辑器、运行时）在另一个仓库：[MyGameEngine-Python](https://github.com/LeyeFang/MyGameEngine-Python)；
 本仓库只放"怎么把引擎用好"的东西。
 
