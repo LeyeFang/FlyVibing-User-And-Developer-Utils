@@ -1,66 +1,68 @@
-# FlyVibing User & Developer Utils
+# FlyVibing Utils
 
-**引擎"使用侧"工具链** —— 给实验设计者（用户）、扩展开发者，以及**引擎团队自己**日常干活用。
-引擎研发侧（环境/测试/打包/安装器）不在这里，那部分留在引擎仓库 `Utils/Dev`。
+给**引擎使用者**的工具箱 —— 不用改引擎源码，就能让 agent 替你搭实验、盯设备、发数据、审扩展。
 
-> 一句话分工：**引擎仓库 = 造引擎；本仓库 = 用引擎。**
+引擎本身（渲染器、编辑器、运行时）在另一个仓库：[MyGameEngine-Python](https://github.com/LeyeFang/MyGameEngine-Python)；
+本仓库只放"怎么把引擎用好"的东西。
 
-## 内容
+## 三个工具
 
-| 目录 | 是什么 | 前提 |
-|---|---|---|
-| `packages/editor-mcp/` | **编辑器实时控制**（MCP + CLI，回环 127.0.0.1:8977）。实体/组件/节点图/PIE/截图/导出… 所有操作与人工点击等价 | **编辑器在运行** |
-| `packages/node-editor/` | **离线节点图工具**：实验 spec → 图 JSON → 注入 `.scene`；`rules.md` 分节规则参考（agent 省上下文） | **不需要引擎运行** |
-| `packages/extension-kit/` | **扩展作者工具包**：`review_extension.py`（提交前静态审查）+ `imgui_headless.py`（无头 GUI 测试唯一入口，自带禁 ini） | 无 |
-| `skills/` | agent 技能权威源（`engine-editor` / `node-graph`）—— 随 wheel 打包，`engine-editor-cli setup` 装配进任意工作区 | 无 |
-| `sdk/` | `[计划]` 类型存根（`ExtensionBase`/`ExtensionContext`）+ 扩展模板 | 无 |
+| 工具 | 解决什么 | 什么时候用 | 需要编辑器在跑吗 |
+|---|---|---|---|
+| **`editor-mcp`** | 让 agent **实时操作编辑器**：加实体/改组件/连节点图/启停 PIE/截图/导出工程。所有操作 = 人工点击 | 调实验、试运行、批量改场景 | ✅ 需要（回环 TCP） |
+| **`node-editor`** | **离线**把"实验 spec"变成节点图并写进 `.scene`；附 `rules.md` 规则参考。可在 CI、无 GPU 机器、批量场景上用 | 设计期、版本库里的可复现实验设计 | ❌ 不需要 |
+| **`extension-kit`** | 写扩展时自检：`review_extension.py` 静态审查（提交前必跑），`imgui_headless.py` 无头 GUI 测试入口（自带禁用 ini） | 开发/提交扩展 | ❌ 不需要 |
 
-## 职责边界（防重复的硬规则）
-
-**图（node graph）这件事，两个入口、一套实现：**
-
-| 能力 | 实时侧 `editor-mcp` | 离线侧 `node-editor` |
-|---|---|---|
-| 建图 | 导入图 JSON + 交互微调（`graph.*`） | **spec → 图 JSON**（可复现、可进版本库） |
-| 校验 | 引擎内服务 `graph.validate.*` | 无头调用**同一个**引擎实现 |
-| 场景写入 | 只改"活场景" | 直接读写 `.scene` 文件（CI / 批量 / 无 GUI） |
-| 规则参考 | — | `rules.md`（唯一权威，分节读取） |
-
-1. **校验/规则实现永远只有一份**（引擎侧 `Application.Core.NodeGraph.validation` + 本仓 `rules.md`）；
-   两个工具都只是"怎么调到它"。工具里**不许**出现第二套校验规则。
-2. **建图分工**：设计期/离线/批量 → `node-editor`；运行期/交互/所见即所得 → `editor-mcp`。
-3. **直接写 `.scene` 文件**只允许在离线侧（运行中的场景改动必须走实时通道，避免双写）。
-
-一句话：**离线设计 → node-editor；运行交互 → editor-mcp；校验实现 → 引擎（唯一）。**
+`skills/` 是 agent 技能（`engine-editor` / `node-graph`），随 wheel 打包，由 `engine-editor-cli setup` 装配到你的工作区。
 
 ## 安装
 
 ```powershell
-# 三个包（开发态用 -e；用户态用 wheel）
 pip install -e packages/editor-mcp
 pip install -e packages/node-editor
 pip install -e packages/extension-kit
 ```
 
-常用入口：
+## 三个常见任务
 
 ```powershell
-engine-editor-cli call sim.state        # 实时通道（编辑器需在运行）
-flyvibing-node-editor rules             # 离线：规则目录（按节读）
-flyvibing-review <扩展目录> --all        # 扩展审查
-python -m flyvibing_extension_kit.imgui_headless   # 无头 GUI 测试入口（库）
+# ① 让 agent 在运行中的编辑器里干活（CLI 零常驻上下文；也可用 MCP）
+engine-editor-cli call sim.state
+engine-editor-cli call entity.add name=Cue
+engine-editor-cli setup --workspace C:\my-experiment      # 装配 skill + MCP 配置
+
+# ② 离线设计一个实验范式，产出可进版本库的节点图
+flyvibing-node-editor rules                  # 规则目录（按节读，省上下文）
+flyvibing-node-editor build --spec spec.json --out graph.json
+flyvibing-node-editor apply --scene scenes/main.scene --graph graph.json
+
+# ③ 交扩展前自检（0 fail 才算过）
+flyvibing-review Functions/MyExtension
 ```
 
-## 依赖与边界（重要）
+## 边界：同一件事只做一遍
 
-- `node-editor` 的**校验**复用引擎实现（`Application.Core.NodeGraph`），因为"两套规则迟早漂移"。
-  独立分发时按优先级：① 随包带上无头 NodeGraph；② 校验降级为"调用运行中的引擎"。
-  这件事写在 `packages/node-editor/README.md` 的「依赖与边界」一节，改动前先读。
-- `editor-mcp` 只经 TCP 回环与编辑器通信，**不 import 引擎内部**。
-- `extension-kit` 纯静态 + imgui 库，**不 import 引擎内部**（reviewer 只做 AST 扫描）。
+**图（node graph）有两个入口，一套实现**（校验规则永远只有引擎里那一份）：
 
-## 与引擎仓库的关系
+| | 离线 `node-editor` | 实时 `editor-mcp` |
+|---|---|---|
+| 建图 | spec → 图 JSON（可复现、进版本库） | 导入图 JSON + 交互微调 |
+| 校验 | 无头调用引擎同一实现 | 引擎内服务 `graph.validate.*` |
+| 场景写入 | 直接读写 `.scene`（CI / 批量 / 无 GUI） | 只改"活场景"（不直接写文件） |
 
-- 引擎仓库 `Utils/Dev` = 引擎研发工具（环境/测试/打包/安装器）；`Utils/User` = 随成品分发的运行时辅助（`player.bat`）。
-- 引擎侧 agent 用到的 skills 以**本仓 `skills/` 为权威源**，由 `scripts/build_tools.py` 同步/打包。
-- 引擎的回归测试需要这些工具时，直接使用本仓（引擎 dev 环境按 `-e` 安装即"假装我们是用户"）。
+- 设计期/批量 → 离线工具；运行期/所见即所得 → 实时工具。
+- 直接写 `.scene` 文件只允许出现在离线侧（运行中的场景改动必须走实时通道，避免双写）。
+- 工具里不实现第二套节点规则：`rules.md` 是文档权威，校验实现来自引擎源码。
+
+## 给维护者
+
+```powershell
+python scripts/build_tools.py      # 同步 skills/ 进各包 → 构建 3 个 wheel → 写 CHECKSUMS.sha256
+python scripts/build_tools.py --no-sync    # 只构建
+```
+
+- `skills/` 是 agent 技能的唯一权威源；`packages/*/.../skills/**` 是构建期同步进去的负载（不要手改）。
+- `extension-kit` 与 `node-editor` 都**不 import 引擎编辑器内部**；`node-editor` 的校验复用引擎
+  `Application.Core.NodeGraph`（避免两套规则漂移），独立分发时的处理方式见
+  `packages/node-editor/README.md` 的「依赖与边界」。
+- 计划中：`sdk/`（`ExtensionBase`/`ExtensionContext` 类型存根 + 扩展模板）。
