@@ -110,6 +110,27 @@ def cmd_help(ns) -> int:
     return 0
 
 
+def cmd_doc(ns) -> int:
+    """内置文档只读服务 (Doc/Dev + Doc/ExtDev — 按节拉取, 省 token)。"""
+    from . import doclib
+
+    action = (ns.action or "list").strip()
+    target = (ns.target or "").strip()
+    try:
+        if action == "list":
+            print(doclib.list_all())
+        elif action == "outline":
+            print(doclib.outline(target))
+        elif action == "search":
+            print(doclib.search(target))
+        else:  # show
+            topic, _, section = target.partition("#")
+            print(doclib.show(topic, section))
+    except ValueError as e:
+        return _fail(f"doc: {e}", 2)
+    return 0
+
+
 def cmd_call(ns) -> int:
     name, defaults = op_registry.resolve(ns.op)
     if not name:
@@ -375,6 +396,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--points", required=True, help="采样点: x:y[;x:y...]（顶左坐标系）")
     p.add_argument("--timeout", type=float, default=6.0)
     p.set_defaults(func=cmd_probe)
+
+    p = sub.add_parser("doc", help="内置文档只读服务（list / outline / show / search; 引擎仓 Doc/** 为其指针 stub）")
+    p.add_argument("action", nargs="?", choices=("list", "outline", "show", "search"), default="list")
+    p.add_argument("target", nargs="?", default="",
+                   help="topic[#节序号或标题片段] 或搜索词; 例: dev/project_export_protocol#3")
+    p.set_defaults(func=cmd_doc)
 
     p = sub.add_parser("setup", help="向工作区安装 skill + mcp.json（独立分发）")
     p.add_argument("--workspace", default=".", help="目标工作区（默认当前目录）")

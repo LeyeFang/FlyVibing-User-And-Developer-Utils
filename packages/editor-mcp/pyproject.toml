@@ -23,4 +23,4 @@ engine-editor-cli = "engine_editor_mcp.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-engine_editor_mcp = ["skills/**/*"]
+engine_editor_mcp = ["skills/**/*", "docs_content/**/*"]
