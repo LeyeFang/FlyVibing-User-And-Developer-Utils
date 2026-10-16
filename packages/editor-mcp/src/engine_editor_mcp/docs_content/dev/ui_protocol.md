@@ -30,7 +30,7 @@
 ## 2. 硬性约定
 
 1. **Widget 只编辑 `inst.props`，不做 IO、不做重计算、不 import 业务/设备层重量级模块**
-   （允许读静态常量，如 `EEGDevice` 的选项表；禁止打开设备/文件）。
+   （允许读静态常量，如 `VirtualDevice` 的选项表；禁止打开设备/文件）。
 2. **props 必须可 JSON 序列化**（int/float/str/bool/list/dict）。`NodeCanvas.to_dict()` 会把
    props 写进 `.scene`；写入 numpy 数组/对象引用 → 导出损坏。
 3. **控件 ID 唯一**：所有控件 label 必须带 `##..._{nid}` 后缀（例：`f"Buffer##siggen_buf_{nid}"`）。

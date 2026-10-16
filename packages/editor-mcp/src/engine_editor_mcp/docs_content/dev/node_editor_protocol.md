@@ -90,7 +90,7 @@ if ctx.dry_run:
   （`validate_graph` 汇总 `events_by_type` / `by action`，测试可断言）。
 - **禁止**在干跑中：开线程、开设备、写文件、改真实场景、导入重依赖。
 - 真实模式失败要**记录并继续**（`emit_log(..., "error", ...)` + print），不得向上抛异常
-  （否则整帧执行中断）。参考 `evaluators/siggen.py` + `Application/Functions/EEGDevice` 空跑后端的写法。
+  （否则整帧执行中断）。参考 `evaluators/siggen.py` + `Application/Functions/VirtualDevice` 空跑后端的写法。
 - 纯数据节点（如 GetSigGenData）干跑中只有在输出**被读取**时才会求值 —— 测试/校验图要保证
   至少有一条数据连线消费它的输出，否则不会出现在干跑事件里。
 

@@ -56,7 +56,7 @@
   MCP 校验链路（`validate_static` + `dry_run_simulation`）。
 - **窗口模式**：`game.json window.mode` 显式配置优先，"auto" 时由 `scene.game_type` 决定。
 - **工作目录**：始终 = 包根（builtin 资源是 CWD 相对路径）；播放器不 chdir。
-- **收尾**：run 返回后调 `SerialParallelDevice.stop()` + `EEGDevice.close_all()` 安全网。
+- **收尾**：run 返回后调 `SerialParallelDevice.stop()` + `VirtualDevice.close_all()` 安全网。
 
 ### 3.1 运行时线程纪律（PIE / 播放器通用，2026-09-28 锁定）
 

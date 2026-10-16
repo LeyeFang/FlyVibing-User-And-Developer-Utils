@@ -137,7 +137,7 @@ rescan:  已装载者全部 unload 后重新扫描（Extensions 菜单 ▸ Resca
 | `ctx.settings(schema)` | `[M1]` | schema 化设置（自动 UI + 持久化）；落地后**页面注册进 Settings 面板**（与 `Common`/`Export` 同级 — 宿主侧已就绪: `SettingsPanel.register_page` / `unregister_pages_by_owner`，见 `Doc/Dev/ui_protocol.md` §13） |
 | `ctx.threads / ctx.jobs / ctx.bus` | `[M2]` | 受管线程 / 后台任务 / 数据总线 |
 | `ctx.ui.post(fn)` | `[M1]` | 后台线程 → 渲染线程帧安全点 |
-| `device`（能力键, **非** ctx 对象） | ✅ M0 | 语义 = **允许导入设备门面** `Application.Functions.EEGDevice`（在 C6 白名单内）；**不提供 `ctx.device`**（不扩大 API 面）; 三模式（sim/device/virtual）与无硬件验收通道见 `Doc/Dev/device_io_protocol.md` §7 |
+| `device`（能力键, **非** ctx 对象） | ✅ M0 | 语义 = **允许导入设备门面** `Application.Functions.VirtualDevice`（在 C6 白名单内）；**不提供 `ctx.device`**（不扩大 API 面）; 三模式（sim/device/virtual）与无硬件验收通道见 `Doc/Dev/device_io_protocol.md` §7 |
 | `ctx.graph`（能力键 `graph`） | ✅ M1 (2026-10-12) | **受限图访问** — 面板 ↔ 场景节点同步的官方通道（“在这里点一下, 场景里就改好了”）。仅三件事: `nodes()`（深拷贝快照）/ `find(prop, equals=None, prefix=None)` / `set_props(node_id, fields)`；无删除/新增/连边。**不 import 编辑器层**（`Application/Editor/Extensions/ExtensionGraph.py` 代转发到编辑器单一入口）。未声明 `graph` 时 `ctx.graph is None` |
 
 > 能力键 `device` 与其它行的区别: 前几行是"宿主注入的 ctx 能力对象", `device` 是**导入许可声明**
