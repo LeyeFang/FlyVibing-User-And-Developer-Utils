@@ -15,6 +15,7 @@
     engine-editor-cli probe [editor|pie] --points 160:120;200:240
                                                  # 像素采样（裸帧 → 指定点 RGBA; 顶左坐标）
     engine-editor-cli setup [--workspace DIR]    # 向任意工作区安装 skill + mcp.json
+    engine-editor-cli doc [tools|tool 名]        # 内置文档（索引优先）+ 开发工具索引
 
 退出码: 0 成功 / 1 引擎或运行时错误 / 2 用法错误。
 """
@@ -114,7 +115,8 @@ def cmd_doc(ns) -> int:
     """内置文档只读服务 — 三层消费: 索引 (默认) → 章节索引 → 按节内容。
 
     宽容解析: `doc` / `doc list` = 全主题两级索引; `doc dev|extdev` = 区索引;
-    `doc <topic>` = 单主题章节索引; `doc outline|show|search` 为显式动作。
+    `doc <topic>` = 单主题章节索引; `doc outline|show|search` 为显式动作;
+    `doc tools` / `doc tool <名>` = 引擎仓 Utils/Dev 开发工具索引与用法。
     """
     from . import doclib
 
@@ -123,6 +125,10 @@ def cmd_doc(ns) -> int:
     try:
         if a in ("", "list"):
             print(doclib.list_all(t))
+        elif a == "tools":
+            print(doclib.tool_help(t) if t else doclib.list_tools())
+        elif a == "tool":
+            print(doclib.tool_help(t) if t else doclib.list_tools())
         elif a == "outline":
             print(doclib.outline(t))
         elif a == "search":
@@ -405,11 +411,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=float, default=6.0)
     p.set_defaults(func=cmd_probe)
 
-    p = sub.add_parser("doc", help="内置文档（索引优先: doc [dev|extdev] 两级索引 / doc outline <topic> / doc show <topic>#节 / doc search <kw>）")
+    p = sub.add_parser("doc", help="内置文档（索引优先: doc [dev|extdev] / doc outline <topic> / doc show <topic>#节 / doc search <kw>）+ 开发工具索引（doc tools / doc tool <名>）")
     p.add_argument("action", nargs="?", default="list",
-                   help="list|outline|show|search（缺省=list 两级索引; 也可直接给 dev/extdev 或 <topic>）")
+                   help="list|outline|show|search|tools|tool（缺省=list 两级索引; 也可直接给 dev/extdev 或 <topic>）")
     p.add_argument("target", nargs="?", default="",
-                   help="topic[#节序号或标题片段] / 区名 / 搜索词; 例: dev/project_export_protocol#3")
+                   help="topic[#节序号或标题片段] / 区名 / 搜索词 / 工具名; 例: dev/project_export_protocol#3 或 tool test_runner")
     p.set_defaults(func=cmd_doc)
 
     p = sub.add_parser("setup", help="向工作区安装 skill + mcp.json（独立分发）")

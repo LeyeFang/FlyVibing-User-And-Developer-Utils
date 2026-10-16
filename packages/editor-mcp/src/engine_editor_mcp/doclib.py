@@ -12,12 +12,17 @@
   engine-editor-cli doc outline dev/x       # 章节索引 (标题 + 预览)
   engine-editor-cli doc show dev/x#3        # 第 3 节 (或 #标题片段)
   engine-editor-cli doc search 关键词        # 跨主题检索
+  engine-editor-cli doc tools               # 开发工具索引 (引擎仓 Utils/Dev)
+  engine-editor-cli doc tool <名>           # 单工具用法 (真实 --help)
 """
 
 from __future__ import annotations
 
+import ast
 import os
 import re
+import subprocess
+import sys
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs_content")
 AREAS = ("dev", "extdev")
@@ -229,3 +234,166 @@ def search(keyword: str, max_hits: int = 30) -> str:
                     out.append("... (截断, 调整关键词缩小范围)")
                     return "\n".join(out)
     return "\n".join(out) if out else f"无匹配: {kw!r}"
+
+
+# ── 开发工具索引 (Utils/Dev — 引擎核心开发者 CLI 工具; 数据源=工具文件本身) ──
+
+_DEFAULT_ENGINE_ROOT = "c:/WorkSpace/FLY/MyGameEngine-Python"
+
+
+def _engine_root() -> str:
+    """引擎仓根 (含 Utils/Dev 视为命中): cwd → MGE_ROOT → 默认路径; 找不到回空串。"""
+    for cand in (os.getcwd(), os.environ.get("MGE_ROOT", ""), _DEFAULT_ENGINE_ROOT):
+        if cand and os.path.isdir(os.path.join(cand, "Utils", "Dev")):
+            return os.path.abspath(cand)
+    return ""
+
+
+def _iter_tools(root: str) -> list[tuple[str, str]]:
+    """(工具名, 路径) — Utils/Dev 顶层 py/bat + Utils/Dev/Installer 顶层 py (不含暂存树)。"""
+    dev = os.path.join(root, "Utils", "Dev")
+    found: list[tuple[str, str]] = []
+    for fn in sorted(os.listdir(dev)):
+        p = os.path.join(dev, fn)
+        if os.path.isfile(p) and fn != "__init__.py" and fn.endswith((".py", ".bat")):
+            found.append((fn.rsplit(".", 1)[0], p))
+    inst = os.path.join(dev, "Installer")
+    if os.path.isdir(inst):
+        for fn in sorted(os.listdir(inst)):
+            p = os.path.join(inst, fn)
+            if os.path.isfile(p) and fn.endswith(".py") and fn != "__init__.py":
+                found.append((fn.rsplit(".", 1)[0], p))
+    return sorted(found)
+
+
+def _bat_leading_comments(path: str, limit: int = 14) -> list[str]:
+    """bat 头部注释块 (:: / REM 行)。"""
+    out: list[str] = []
+    for ln in _read(path).splitlines():
+        s = ln.strip()
+        if s.startswith("::"):
+            c = s[2:].strip(" =")
+            if c:
+                out.append(c)
+        elif s.lower().startswith("rem "):
+            c = s[4:].strip()
+            if c:
+                out.append(c)
+        elif out:
+            break
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _tool_purpose(path: str) -> str:
+    """工具用途 = docstring 首段首行 (bat: 头部注释); 去 '工具名 — ' 前缀, 截断 100。"""
+    if path.endswith(".bat"):
+        comments = _bat_leading_comments(path, 1)
+        first = comments[0] if comments else ""
+    else:
+        try:
+            doc = ast.get_docstring(ast.parse(_read(path))) or ""
+        except SyntaxError:
+            doc = ""
+        first = next((ln.strip() for ln in doc.splitlines() if ln.strip()), "")
+    head, sep, tail = first.partition(" — ")
+    stem = os.path.splitext(os.path.basename(path))[0]
+    if sep and (head in (stem, stem + ".py", stem + ".bat") or head.endswith((".py", ".bat"))):
+        first = tail.strip()
+    first = _normalize_text(first)
+    return first[:100] + "…" if len(first) > 100 else first
+
+
+def _argparse_rows(text: str) -> list[str]:
+    """静态提取 add_argument 概要 (无 argparse 或 --help 失败时的回退)。"""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+    rows: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (isinstance(func, ast.Attribute) and func.attr == "add_argument"):
+            continue
+        pos = [a.value for a in node.args if isinstance(a, ast.Constant) and isinstance(a.value, str)]
+        kw: dict = {}
+        for k in node.keywords:
+            if isinstance(k.value, ast.Constant) and isinstance(k.value.value, (str, int, float)):
+                kw[k.arg] = k.value.value
+        if pos and pos[0].startswith("-"):
+            label = ", ".join(pos)
+        elif pos:
+            label = str(kw.get("metavar", pos[0])).upper()
+        else:
+            label = "(arg)"
+        help_text = str(kw.get("help", "")).strip()
+        rows.append(f"  {label:<26}{help_text}"[:150])
+    return rows
+
+
+def list_tools() -> str:
+    """开发工具索引 — 引擎仓 Utils/Dev (test_runner / thread_probe / i18n_tool ...)。"""
+    root = _engine_root()
+    if not root:
+        raise ValueError("未找到引擎仓 (需含 Utils/Dev): 在引擎仓内运行, 或设置环境变量 MGE_ROOT")
+    tools = _iter_tools(root)
+    width = max((len(n) for n, _ in tools), default=12) + 2
+    out = ["引擎开发工具 — Utils/Dev（用法: doc tool <名>; 均可直接命令行运行）", ""]
+    for name, path in tools:
+        purpose = _tool_purpose(path)
+        out.append(f"  {name:<{width}}{purpose}" if purpose else f"  {name}")
+    out.append("")
+    out.append(f"定位: {root}  (MGE_ROOT 可覆盖)")
+    return "\n".join(out)
+
+
+def tool_help(name: str) -> str:
+    """单工具用法 — argparse 工具实跑 --help (权威); 其余给 docstring/注释 + 静态概要。"""
+    root = _engine_root()
+    if not root:
+        raise ValueError("未找到引擎仓 (需含 Utils/Dev): 在引擎仓内运行, 或设置环境变量 MGE_ROOT")
+    raw = (name or "").strip()
+    if not raw:
+        raise ValueError("缺少工具名 (见 `doc tools`)")
+    raw = raw.replace("/", " ").split()[-1]
+    if raw.endswith((".py", ".bat")):
+        raw = raw.rsplit(".", 1)[0]
+    tools = dict(_iter_tools(root))
+    path = tools.get(raw)
+    if not path:
+        close = [n for n in tools if raw.lower() in n.lower()]
+        hint = f"; 相近: {', '.join(close)}" if close else ""
+        raise ValueError(f"未知工具: {raw!r} (见 `doc tools`){hint}")
+    rel = os.path.relpath(path, root).replace(os.sep, "/")
+    purpose = _tool_purpose(path)
+    head = f"# {rel}" + (f" — {purpose}" if purpose else "")
+    if path.endswith(".bat"):
+        body = "\n".join(_bat_leading_comments(path)) or "(无头部注释)"
+        return f"{head}\n\n{body}\n\n(批处理入口 — 直接运行; 无 --help)\n"
+    text = _read(path)
+    if "argparse" in text:  # 仅 argparse 工具才可安全实跑 --help (无 argparse 的脚本会真执行)
+        env = dict(os.environ)
+        env["PYTHONIOENCODING"] = "utf-8"
+        try:
+            proc = subprocess.run(
+                [sys.executable, path, "--help"], cwd=root, env=env,
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=30)
+            real = (proc.stdout or "").strip()
+            if proc.returncode == 0 and real:
+                return f"{head}\n\n{real}\n"
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    try:
+        doc = ast.get_docstring(ast.parse(text)) or ""
+    except SyntaxError:
+        doc = ""
+    parts = [head, "", doc.strip() or "(无 docstring)"]
+    rows = _argparse_rows(text)
+    if rows:
+        parts += ["", "参数概要 (静态提取):", *rows]
+    parts += ["", "(静态概要 — 未取到真实 --help; 运行 `python <工具> --help` 验证)"]
+    return "\n".join(parts) + "\n"
