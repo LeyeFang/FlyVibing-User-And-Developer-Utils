@@ -1,17 +1,17 @@
-"""内置文档 CLI — Doc/Dev 与 Doc/ExtDev 的只读服务层 (2026-10-16, Doc CLI 化第一章)。
+"""内置文档 CLI — Doc/Dev 与 Doc/ExtDev 的只读服务层 (2026-10-16, Doc CLI 化)。
 
-设计:
-  - 内容随 wheel 分发: ``docs_content/{dev,extdev}/<topic>.md`` (单一权威 = 工具仓);
-    引擎仓 ``Doc/**`` 同名文件保留为"指针 stub"(提示内容在 CLI)。
-  - 按二级标题 (``## ``) 分节读取; 目标是 agent **按节拉取**省 token
-    (对照 node-editor ``get_rules`` 的渐进披露)。
+三层消费模型 (用户定稿 — "agent 面对 doc 更多时间在查字典索引"):
+  ① 大方向指引: 引擎仓 Doc/** 的 md 只答两个问题 — 这份文档"面对什么问题"、内容"去哪获得";
+  ② 字典索引 (最常停留): ``doc`` = 全主题两级索引 (主题目的行 + 次级标题);
+     ``doc outline <topic>`` = 单主题章节索引 (标题 + 一行预览); ``doc search <kw>`` 跨主题;
+  ③ 内容: ``doc show <topic>[#节号]`` 按节拉取 — 只在确定要读哪节时才输出正文。
 
 用法:
-  engine-editor-cli doc                     # 主题目录
-  engine-editor-cli doc outline dev/x       # 章节目录
-  engine-editor-cli doc show dev/x          # 全文
+  engine-editor-cli doc                     # 两级索引 (全主题)
+  engine-editor-cli doc dev                 # 只索引 dev 区
+  engine-editor-cli doc outline dev/x       # 章节索引 (标题 + 预览)
   engine-editor-cli doc show dev/x#3        # 第 3 节 (或 #标题片段)
-  engine-editor-cli doc search 关键词        # 跨主题搜索
+  engine-editor-cli doc search 关键词        # 跨主题检索
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs_conten
 AREAS = ("dev", "extdev")
 
 _H2 = re.compile(r"^##\s+(.*)$", re.MULTILINE)
+_JUNK_LINE = re.compile(r"[-:|\s=]+")
 
 
 def _iter_topics():
@@ -64,6 +65,61 @@ def _doc_title(text: str, topic: str) -> str:
     return m.group(1).strip() if m else topic
 
 
+def _clean_inline(text: str) -> str:
+    """行内 markdown 清理 (供索引行/预览使用)。"""
+    text = re.sub(r"`([^`]*)`", r"\1", text)
+    text = re.sub(r"\*\*([^*]*)\*\*", r"\1", text)
+    return text.strip()
+
+
+def _normalize_text(text: str) -> str:
+    """合并换行空白 + 去 CJK 间空格 + 去标点后空格 (中文折行伪影清理)。"""
+    text = re.sub(r"\s+", " ", _clean_inline(text)).strip()
+    text = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])", "", text)
+    text = re.sub(r"([，、。：；！？（）])\s+", r"\1", text)
+    return text
+
+
+def _purpose(text: str, topic: str) -> str:
+    """文档目的行 = H1 后首段 (句号处收尾, 最多 3 行; 截断 120)。"""
+    started = False
+    para: list[str] = []
+    for ln in text.splitlines():
+        s = ln.strip()
+        if not started:
+            if s.startswith("# "):
+                started = True
+            continue
+        s = re.sub(r"^>\s*", "", s).strip()
+        if not s:
+            if para:
+                break
+            continue
+        if not para and s.startswith(("-", "|", "#", "```")):
+            break  # 首段不是散文 → 放弃 (回退 topic)
+        para.append(s)
+        if s.endswith(("。", "！", "？")) or len(para) >= 3:
+            break
+    joined = _normalize_text(" ".join(para))
+    if len(joined) > 120:
+        joined = joined[:120].rstrip("，、：:；;/ .")
+    return joined or topic
+
+
+def _preview(body: str, limit: int = 80) -> str:
+    """节预览 = 正文首个可读行 (跳过代码块/表格/引用/分隔线; 去列表标记)。"""
+    for ln in body.splitlines():
+        s = ln.strip()
+        if (not s or s.startswith(("```", "|", ">", "#"))
+                or _JUNK_LINE.fullmatch(s)):
+            continue
+        s = re.sub(r"^[-*]\s+(?:\[[ xX]\]\s+)?", "", s)
+        s = _normalize_text(s)
+        if s:
+            return s[:limit].rstrip("，、：:；;/ .") + ("…" if len(s) > limit else "")
+    return ""
+
+
 def _sections(text: str) -> list[tuple[str, str]]:
     """[("", preamble), (title, body), ...] — 按 ## 分节 (body 不含标题行)。"""
     matches = list(_H2.finditer(text))
@@ -82,30 +138,43 @@ def _sections(text: str) -> list[tuple[str, str]]:
 # ── 对外 ────────────────────────────────────────────────────────────
 
 
-def list_all() -> str:
-    topics = list(_iter_topics())
+def list_all(area: str = "") -> str:
+    """两级索引: 主题 (目的行) → 次级标题 — 字典索引层, 默认输出。area 过滤 dev/extdev。"""
+    area = (area or "").strip()
+    if area and area not in AREAS:
+        raise ValueError(f"未知领域: {area!r} (可选: {', '.join(AREAS)})")
+    topics = [(t, p) for t, p in _iter_topics() if not area or t.split("/", 1)[0] == area]
     if not topics:
-        return "(docs_content 为空 — wheel 未打包文档数据)"
-    lines = [f"{'topic':<44}{'节数':<6}{'行数':<6}标题"]
+        return f"(无主题{'' if not area else ' —— 领域 ' + area})"
+    out: list[str] = []
     for topic, path in topics:
         text = _read(path)
-        n_sec = len(_H2.findall(text))
-        n_line = text.count("\n") + 1
-        lines.append(f"{topic:<44}{n_sec:<6}{n_line:<6}{_doc_title(text, topic)}")
-    return "\n".join(lines)
+        out.append(f"{topic} — {_doc_title(text, topic)}")
+        out.append(f"    面向: {_purpose(text, topic)}")
+        n = 0
+        for title, _body in _sections(text):
+            if title:
+                n += 1
+                out.append(f"    {n}. {re.sub(r'^[0-9]+[.、] *', '', title)}")
+        out.append("")
+    out.append("逐级深入: doc outline <topic> (章节索引) → doc show <topic>#<节号|标题片段>")
+    return "\n".join(out)
 
 
 def outline(topic: str) -> str:
+    """章节索引 (标题 + 一行预览) — 索引层, 决定要读哪节用。"""
     canon, path = resolve(topic)
     text = _read(path)
-    lines = [f"# {canon} — {_doc_title(text, canon)}"]
+    lines = [f"# {canon} — {_doc_title(text, canon)}",
+             f"面向: {_purpose(text, canon)}"]
     n = 0
     for title, body in _sections(text):
         if not title:
-            lines.append(f"  (前言 {body.count(chr(10)) + 1} 行)")
             continue
         n += 1
-        lines.append(f"  {n}. {re.sub(r'^[0-9]+[.、] *', '', title)}")
+        prev = _preview(body)
+        t = re.sub(r"^[0-9]+[.、] *", "", title)
+        lines.append(f"  {n}. {t}" + (f" — {prev}" if prev else ""))
     lines.append("")
     lines.append(f"读取: engine-editor-cli doc show {canon}#<序号或标题片段>")
     return "\n".join(lines)

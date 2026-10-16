@@ -111,21 +111,29 @@ def cmd_help(ns) -> int:
 
 
 def cmd_doc(ns) -> int:
-    """内置文档只读服务 (Doc/Dev + Doc/ExtDev — 按节拉取, 省 token)。"""
+    """内置文档只读服务 — 三层消费: 索引 (默认) → 章节索引 → 按节内容。
+
+    宽容解析: `doc` / `doc list` = 全主题两级索引; `doc dev|extdev` = 区索引;
+    `doc <topic>` = 单主题章节索引; `doc outline|show|search` 为显式动作。
+    """
     from . import doclib
 
-    action = (ns.action or "list").strip()
-    target = (ns.target or "").strip()
+    a = (ns.action or "").strip()
+    t = (ns.target or "").strip()
     try:
-        if action == "list":
-            print(doclib.list_all())
-        elif action == "outline":
-            print(doclib.outline(target))
-        elif action == "search":
-            print(doclib.search(target))
-        else:  # show
-            topic, _, section = target.partition("#")
+        if a in ("", "list"):
+            print(doclib.list_all(t))
+        elif a == "outline":
+            print(doclib.outline(t))
+        elif a == "search":
+            print(doclib.search(t))
+        elif a == "show":
+            topic, _, section = t.partition("#")
             print(doclib.show(topic, section))
+        elif a in doclib.AREAS and not t:
+            print(doclib.list_all(a))
+        else:  # `doc dev/x` 或裸主题 → 单主题章节索引
+            print(doclib.outline(f"{a}/{t}" if t else a))
     except ValueError as e:
         return _fail(f"doc: {e}", 2)
     return 0
@@ -397,10 +405,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=float, default=6.0)
     p.set_defaults(func=cmd_probe)
 
-    p = sub.add_parser("doc", help="内置文档只读服务（list / outline / show / search; 引擎仓 Doc/** 为其指针 stub）")
-    p.add_argument("action", nargs="?", choices=("list", "outline", "show", "search"), default="list")
+    p = sub.add_parser("doc", help="内置文档（索引优先: doc [dev|extdev] 两级索引 / doc outline <topic> / doc show <topic>#节 / doc search <kw>）")
+    p.add_argument("action", nargs="?", default="list",
+                   help="list|outline|show|search（缺省=list 两级索引; 也可直接给 dev/extdev 或 <topic>）")
     p.add_argument("target", nargs="?", default="",
-                   help="topic[#节序号或标题片段] 或搜索词; 例: dev/project_export_protocol#3")
+                   help="topic[#节序号或标题片段] / 区名 / 搜索词; 例: dev/project_export_protocol#3")
     p.set_defaults(func=cmd_doc)
 
     p = sub.add_parser("setup", help="向工作区安装 skill + mcp.json（独立分发）")
