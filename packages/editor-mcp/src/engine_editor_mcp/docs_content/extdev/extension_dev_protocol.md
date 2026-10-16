@@ -3,7 +3,7 @@
 > 读者: **外部/无上下文的开发者与 agent**（模拟社区生态 — 只有本文件 + 仓库即可开工）。
 > 架构背景: `extension_protocol.md`（三层高度模型 / 三档侵入 / 兼容机制）。
 > 状态: **M0 已实装 + M1 部分实装**（`ctx.ui.register_window` 2026-10-11；
-> 官方示例 = `Functions/SerialParallelDevice`（设备 IO + 监视面板））；
+> 官方示例 = `Functions/SerialParallelDevice`（设备 IO + 事件流面板）与 `Functions/VirtualDevice`（虚拟设备 + 波形监视面板））；
 > M1+ 剩余能力在本文件中以 `[M1 待]` 标注（当前为设计约束, 实装后按其验收）。
 
 ---
@@ -19,7 +19,8 @@
 |---|---|---|
 | `sigproc` | `Functions/SignalProcess/` | skeleton（可装载样例） |
 | `bci` | `Functions/BCIAlgorithm/` | partial（内核算已实现, 待迁移） |
-| `device` | `Functions/SerialParallelDevice/` | partial（设备 IO 已实现, 面板待做） |
+| `device` | `Functions/SerialParallelDevice/` | v0.2.0（设备 IO + 事件流监视面板, 见 §7） |
+| `virtual` | `Functions/VirtualDevice/` | v0.1.0（**波形监视面板范例**: watch/record + 显示滤波 + `ext.virtual.*` 九件套, 见 §7） |
 
 ## 2. 快速上手（最小扩展）
 
@@ -279,6 +280,11 @@ C1/C2 检查基类与实现、C3 检查 close_policy 声明（检查项全表见
 > **接手维护该扩展的 agent 入口**: `Functions/SerialParallelDevice/HANDOFF.md`（交接书: 边界/裁决/坑/下一步/验收）
 > + `HANDOFF_PROMPT.md`（可直接粘给新会话的启动提示词）。
 
+**第二个官方示例（设备族面板模板）**: `Functions/VirtualDevice/`（虚拟信号发生器波形监视面板 —
+watch / record 分离、实时示波器（min/max 包络 + 悬停读数）、显示滤波（陷波/频带, 2/4 阶因果 IIR）、
+采集落盘、`ext.virtual.*` **九件套** ops、设置持久化与 `close_policy="disable"` 收尾;
+**厂商复制指南**见其 README — 设备族面板扩展的起手模板）。
+
 ## 8. 节点包规范（`[M1]` 设计）
 
 开发者只提交**声明**，ExtensionManager 翻译到引擎既有五注册点（`node_editor_protocol.md`）：
@@ -383,6 +389,7 @@ C1/C2 检查基类与实现、C3 检查 close_policy 声明（检查项全表见
 | 发现/校验/启停/持久化/隔离 · ops 增量扫描 · Extensions 菜单 · `extension.*` ops | ✅ M0 (2026-10-11) |
 | `ctx.ui.register_window` + ExtensionUI 桥 + **官方示例扩展**（device 监视面板 — 含真实串口闭环与侵入风险审查） | ✅ M1 部分 (2026-10-11) |
 | **窗口生命周期完备性**（close_policy / on_ui_event / `UIExtensionBase` 语言层强制 / 挂起停用队列）+ ExtensionKit 审查器 v0 | ✅ M1 (2026-10-11) |
+| **VirtualDevice 波形监视面板范例**（Gtec 设计语言干净重写: watch/record + 示波器 + 显示滤波 + `ext.virtual.*` 九件套 + 厂商复制指南） | ✅ M1 (2026-10-16) |
 | UI 剩余（command/kit/post）· 节点包 · 设置（schema 化） | `[M1 待]` |
 | 线程/任务/总线受管模型 · ThreadRegistry 集成 | `[M2]` |
 | 外部目录安装（.mgext）· 脚手架 `ext-init` · 示例扩展 · 贡献审计 · 边界测试全套 | `[M3]` |

@@ -10,7 +10,7 @@
 | 模块 | 架构 | 要点 |
 |---|---|---|
 | `Functions/SerialParallelDevice/` | 全局单例 + I/O 线程 + 队列 | `api.py`（start/stop/send/write_parallel）、`io_thread.py`、`state.py`、`test_hooks.py`；无驱动优雅降级；5ms 自动复位 |
-| `Functions/EEGDevice/` | 会话注册表 + 后端协议 + 环形缓冲 + **品牌服务进程** | `Device.py`（后端无关：配置/缓冲/会话/注册表/落盘）、`ServiceProtocol/ServiceHost/ServiceClient.py`（品牌进程通信，见 §7）、`VirtualDevice/`（品牌目录：虚拟信号发生器 + 服务入口; 引擎环境）、`eCon/`（品牌目录：念通科技 econEXG 预留; 自有环境）、`__init__.py`（门面路由） |
+| `Functions/EEGDevice/` | 会话注册表 + 后端协议 + 环形缓冲 + **品牌服务进程** | `Device.py`（后端无关：配置/缓冲/会话/注册表/落盘）、`ServiceProtocol/ServiceHost/ServiceClient.py`（品牌进程通信，见 §7）、`VirtualDevice/`（品牌目录：虚拟信号发生器 + 服务入口; 引擎环境; 2026-10-16 起唯一在库品牌）、`__init__.py`（门面路由） |
 
 共同约束：
 - **不得反向依赖 Engine / Editor**；被求值器（`Application/Core/NodeGraph/evaluators/*`）调用。
@@ -91,11 +91,13 @@
 - 键规则单点定义在 `graph_constraints`（`device_session_key` / `pool_key`），
   评估器 / 校验器 / UI 下拉三处共用，禁止另写变体。
 - 干跑隔离：池与会话共用 `dryrun#` 命名空间，任务结束由 `validation/dry_run.py` 一并清理。
-- **品牌目录布局（2026-10-03 已落地）**：`Functions/EEGDevice/{VirtualDevice, eCon}/` 品牌目录
-  —— **一个品牌（一个 API）= 一个独立文件夹 + 独立环境**（VirtualDevice 用引擎环境；eCon 自有
-  环境）；品牌 = 独立进程文件应用（后端 + `service.py`，见 §7）。导出**按需包含**：项目未引用某品牌时，
+- **品牌目录布局（2026-10-03 已落地; 2026-10-16 eCon 移除）**：`Functions/EEGDevice/{品牌}/` 品牌
+  目录（当前仅 `VirtualDevice/`）—— **一个品牌（一个 API）= 一个独立文件夹 + 独立环境**;
+  品牌 = 独立进程文件应用（后端 + `service.py`，见 §7）。导出**按需包含**：项目未引用某品牌时，
   其目录（含未来成品环境）不随导出。设备池 = 进程组管理单元（池条目 `meta` 预留进程句柄/启动参数）。
   延伸规则：`Functions/` 下未来一律按**终端可安装的可选拓展**演进（仅备忘，暂不施工）。
+- **面板参考实现**：`Functions/VirtualDevice/`（波形监视面板 — watch/record + 示波器 +
+  显示滤波 + `ext.virtual.*` 九件套; 见 `Doc/ExtDev/extension_dev_protocol.md` §7）。
 
 ---
 

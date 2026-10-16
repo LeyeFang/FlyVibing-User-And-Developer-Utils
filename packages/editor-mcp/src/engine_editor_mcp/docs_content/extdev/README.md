@@ -26,6 +26,7 @@
 |---|---|---|---|
 | SignalProcess | `Functions/SignalProcess/` | skeleton（可装载） | 最小 extension.py + `ext.sigproc.info` op 注册 |
 | SerialParallelDevice | `Functions/SerialParallelDevice/` | v0.2.0 | **官方完整示例**：独立监视面板 + 逻辑设备名（`@alias` 跨机器）+ `ext.device.*` ops 八件套 + 面板↔场景同步 |
+| VirtualDevice | `Functions/VirtualDevice/` | v0.1.0 | **设备族面板模板（官方示例）**：watch/record 分离 + 实时示波器 + 显示滤波（因果 IIR）+ `ext.virtual.*` 九件套 + 设置持久化; 厂商复制指南见其 README |
 | BCIAlgorithm | `Functions/BCIAlgorithm/` | partial | FBCSP/CCA 算法资产迁移规划 |
 
 > 每个扩展目录内含 `TODO.md`（状态档案 + 落地清单），是本展示范。
