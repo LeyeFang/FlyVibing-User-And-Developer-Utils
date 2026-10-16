@@ -1,7 +1,7 @@
 """rules.md 分节读取 — 渐进披露（MCP get_rules / CLI rules 共用）。
 
 设计: 全文读入按 markdown 标题切块; outline 只列目录+规模（省 token）;
-section(title) 精确取节 — 支持子标题（如 "Gtec"）; 取 h2 标题则得到整族内容。
+section(title) 精确取节 — 支持子标题（如 "SigGen"）; 取 h2 标题则得到整族内容。
 纯标准库, 不依赖 mcp / Application。
 """
 
@@ -59,7 +59,7 @@ def outline(text: str | None = None) -> str:
         lines.append(f"{'  ' * (s['level'] - 2)}- {s['title']}（{s['chars']} 字符）")
     lines += [
         "",
-        '用法: get_rules(section="<标题>") 取节（子标题可单独取, 如 "Gtec"）; section="all" 全文',
+        '用法: get_rules(section="<标题>") 取节（子标题可单独取, 如 "SigGen"）; section="all" 全文',
         'CLI : python -m flyvibing_node_editor.cli rules "<标题>"（--out 落盘只回摘要）',
     ]
     return "\n".join(lines)

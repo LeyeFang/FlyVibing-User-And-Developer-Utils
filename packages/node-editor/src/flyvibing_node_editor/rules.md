@@ -136,32 +136,6 @@
 | PathVar | — | Path(string) | browse_mode: directory/file, path |
 | TextFileWrite | exec_in, FilePath, FileName, Value | exec_out | mode: pin, write_mode: w/a, delimiter |
 
-### Gtec (g.HIamp EEG — IO ▸ Gtec)
-| type_name | input | output | props |
-|-----------|-------|--------|-------|
-| InitGtecDevice | exec_in | exec_out | device: HIAMP, device_name, serial(""=auto), template: 64ch/128ch/144ch, sampling_rate: 256..38400, notch: off/50/60, filter_type: none/highpass/lowpass/bandpass, low_cut, high_cut (0 = unset), export_format: npz/csv, save_dir ("." = cwd), buffer_seconds |
-| StartGtecRecord | exec_in | exec_out | device_name |
-| StopGtecRecord | exec_in | exec_out | device_name, save_scope: session/buffer |
-| KillGtecDevice | exec_in | exec_out | device_name |
-| GetGtecData | — (pure data node) | Data(variant ndarray channels×samples), Channels(int), Samples(int), Fs(float) | device_name |
-
-Gtec 规则 (MUST):
-1. **InitGtecDevice 与 KillGtecDevice 强制成对出现** — 引擎校验静态检查会报错；
-   编辑器删除任一侧会级联删除另一侧。Kill 与 Init 通过 device_name 绑定
-   (Kill 的 device_name 为空且仅 1 个 Init 时自动绑定)。
-2. Trigger 固定启用（16 条数字线合并为 1 个附加通道），无用户配置项。
-3. 在线滤波: notch 独立选择；截止频率 = 0 表示"未填"→ 不生效；与 filter_type
-   不匹配的字段被忽略（如 lowpass + low_cut 只生效 high_cut）。设备滤波器是离散预设，
-   匹配不到预设时跳过并告警（不阻塞采集）。
-4. 窗口缓冲: buffer_seconds × sampling_rate → (channels, N) float32，旧数据被新数据覆盖。
-   GetGtecData 每次求值返回 (channels, N) 的非销毁副本（未填充区为 0），
-   同时给出 Channels / Samples(有效样本数) / Fs。数组大小只取决于 Init 配置。
-5. StopGtecRecord 保存: scope=session → 本次 Start 以来全部数据; scope=buffer → 仅当前窗口。
-   目录与格式来自 Init（默认 "." 当前目录）；npz/csv + 同名 .json 元数据。
-6. 无硬件 / MCP 干跑（validate_graph 设 max_frames>0）: 全部节点走确定性空跑后端 —
-   不触硬件、不落盘、不起线程，干跑可复现。
-7. device_name 为空 = 运行时注册表仅一个会话时自动绑定；多会话时必须显式指定。
-
 ### SigGen (虚拟信号发生器 — IO ▸ SigGen)
 | type_name | input | output | props |
 |-----------|-------|--------|-------|
@@ -172,13 +146,20 @@ Gtec 规则 (MUST):
 | GetSigGenData | — (pure data node) | Data(variant ndarray channels×samples), Channels(int), Samples(int), Fs(float) | device_name |
 
 SigGen 规则 (MUST):
-1. **InitSigGenDevice 与 KillSigGenDevice 强制成对出现** — 与 Gtec 同一配对规则
-   (引擎校验静态检查 + 编辑器删除级联; 绑定规则同 Gtec)。
+1. **InitSigGenDevice 与 KillSigGenDevice 强制成对出现** — 设备族统一配对规则
+   (引擎校验静态检查 + 编辑器删除级联; Kill 的 device_name 为空且仅 1 个 Init 时自动绑定)。
 2. 纯软件正弦源: 通道 i 频率 = frequency + i·freq_step Hz, 幅度 µV float32,
    noise_uv>0 时按 seed 叠加确定性高斯噪声 — 任意机器可跑, 无硬件依赖。
-3. 窗口缓冲 / GetSigGenData / Stop 保存语义与 Gtec 完全一致 (§Gtec 规则 4/5/6)。
-   区别: 真实模式 (非干跑) 会真正写出 npz/csv + .json 到 save_dir; 干跑不落盘。
-4. Gtec 与 SigGen 共用同一设备会话注册表 — device_name 跨族必须唯一。
+3. 窗口缓冲 / GetSigGenData / Stop 保存语义 = 设备族统一实现:
+   buffer_seconds × sampling_rate → (channels, N) float32 环形缓冲, 旧数据被新数据覆盖;
+   Get 每次求值返回非销毁副本 (Channels / Samples 有效样本数 / Fs 辅出);
+   Stop: save_scope=session → 本次 Start 以来全部数据, buffer → 仅当前窗口;
+   目录与格式来自 Init (默认 "." 当前目录), npz/csv + 同名 .json 元数据。
+   区别: 真实模式 (非干跑) 真正写盘; 干跑不落盘。
+4. 所有设备族共用同一设备会话注册表 — device_name 跨族必须唯一;
+   为空 = 注册表仅一个会话时自动绑定, 多会话必须显式指定。
+5. 无硬件 / MCP 干跑 (validate_graph 设 max_frames>0): 全部节点走确定性空跑后端 —
+   不触硬件、不落盘、不起线程, 干跑可复现。
 
 ### Game
 | type_name | input | output | notes |

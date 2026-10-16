@@ -174,7 +174,7 @@ graph TB
   Extensions 主菜单（列出/启停/broken 展示）✓ + `extension.list/enable/disable` ops ✓ +
   扩展 op 增量扫描注册表（`ext.<id>.*`）✓ + 四个默认扩展 manifest + TODO 建档 ✓;
   开发规范: `Doc/ExtDev/extension_dev_protocol.md`（实装地图为权威）。
-- **M1**：UI API（register_window / register_command / kit / ui.post）+ Gtec "信号/阻抗/控制"三窗 demo。
+- **M1**：UI API（register_window / register_command / kit / ui.post）+ 官方示例面板（device 监视面板）。
 - **M2**：线程 API（threads / jobs / tasks / bus）+ ThreadRegistry 集成 + "三分执行模型"开发者文档。
 - **M3**：外部化（用户目录发现 / .mgext 安装卸载 / 设置存储 / 脚手架 / 示例扩展 / `extension_dev_guide.md` / 扩展测试协议）。
 
@@ -187,3 +187,46 @@ graph TB
 3. **M0**: 已执行（改名 + ExtensionManager 骨架 + 菜单 + ops 通道 + 默认扩展建档）。
 4. 上轮蓝图遗留 6 问: 默认按推荐执行 — UI 直通+封装双层 / 外部目录 M3 / 扩展命令进契约（ext.* 独立于核心表）/
    设备类默认进程隔离 / 保留 `Functions/` 目录名 / v1 范围仅编辑器扩展（Mod 不做）。
+
+---
+
+## 9. 扩展边界执行细则（2026-10-16 — 事故复盘后定稿）
+
+背景: 一次社区交付的设备插件被置于内置扩展扫描根（`Functions/EEGDevice/Gtec/`）并被当作
+“官方示例”引用 — 菜单/测试/文档/校验随之产生**隐性三方引用**，核心树被迫随插件演化
+（2026-10-16 已整体剥离）。以下细则用于根治该类依赖方向破坏。
+
+**R1 — 核心树零扩展内容（红线）**
+- `Application/**` 不得出现任何具体扩展/品牌内容: 节点类型、菜单项、校验规则、测试夹具、
+  文档样板、op 名（`ext.<id>.*`）皆禁止。机制代码（ExtensionManager / NodeGraph 注册点 /
+  设备注册表）只认“扩展”这一抽象，不认任何具体 id。
+- 机制需要展示提示文案时，仅描述**能力**（如“在设备面板绑定”），不得点名具体 op（点名即耦合）。
+
+**R2 — 内置扩展 = 主团队自研（红线）**
+- 仓库根 `Functions/**`（内置扫描根）只允许主团队自研的官方示例/自研扩展入库。
+  第三方/社区交付件**一律不入库**（无论是否“送给官方”），只经用户目录加载与分发。
+- 官方示例与自研扩展由主团队拥有许可、代码与验收；社区件若需官方形态，由主团队重写吸收。
+
+**R3 — 依赖方向与能力缺口流程**
+- 依赖方向单向: 扩展 → SDK/公开面（ExtensionContext / 白名单 import）；核心绝不依赖扩展。
+- 扩展需要“核心改动”时**停下来**: 登记能力缺口（下表），用 SDK 能力补全解决;
+  禁止为具体扩展打核心补丁。缺口立项在本文档与扩展蓝图维护。
+
+**注入完备性现状表**（“扩展能合规做到什么”的权威清单）:
+
+| 能力 | 状态 | 说明 |
+|---|---|---|
+| `ctx.ui.register_window`（面板注入） | ✅ 已实装 | ExtensionUI 桥（2026-10-11） |
+| `ctx.ops.register`（op 注入） | ✅ 已实装 | `ext.<id>.*` 增量注册 |
+| `ctx.graph`（受限图访问） | ✅ 已实装 | 面板↔场景同步（2026-10-12） |
+| `ctx.ui.register_command / post / kit` | 🚧 [M1 待] | 命令 / 帧安全点 / 控件包 |
+| `ctx.nodes.register_pack`（节点注入） | 🚧 [M1 设计已定] | **最高优先缺口**: 带节点扩展在落地前无法合规集成 |
+| `ctx.settings(schema)` / `ctx.threads / jobs / bus` | 🚧 [M1/M2 待] | schema 化设置 / 受管线程与总线 |
+
+> 结论: **节点携带型扩展（如设备节点族）在 NodePack 落地前不进入生态**——问题应当由
+> 能力缺口清单追踪，而不是“临时放核心树”。
+
+**提交自查（核心开发者）**: grep 品牌名/扩展 id（源码+文档+测试+菜单）→ 零命中;
+内置扩展清单仅含主团队件; 新增对外提示不含具体 op 名。守卫立项: `Test/Application/Extensions/test_extension_boundary.py`（§6）。
+
+**案例档案**: `Test/_gtec_archive_20261016/README.md`（事故全记录 + 处置）。

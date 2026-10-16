@@ -19,7 +19,7 @@
 | `eeg-<brand>-service` | ServiceClient | `_start_reader`（push 模式） | 0（阻塞 recv） | rid 路由 + 回调 |
 | `spd-io` | SerialParallelDevice | `start()` | 0（队列驱动） | 任务队列（tx_queue） |
 
-> 品牌独立进程（如 Gtec）**自己的线程**运行在它自己的进程里——引擎快照看不到它；
+> 品牌独立进程**自己的线程**运行在它自己的进程里——引擎快照看不到它；
 > 引擎侧与之通信的线程 = `eeg-<brand>-service`（ServiceClient reader 模式，本协议的标准样例）。
 
 ## 2. 跨线程三通道（只许这三种）+ 禁止项
@@ -47,7 +47,7 @@ finally:
 # 4. 验收: python Utils/Dev/thread_probe.py --assert-alive my-worker
 ```
 
-- **命名**：小写「域-用途」（`spd-io` / `eeg-gtec-service`）；每实例带后缀（`render:EditorHost`）；每连接带 tid（`live-client:<tid>`）。
+- **命名**：小写「域-用途」（`spd-io` / `eeg-<brand>-service`）；每实例带后缀（`render:EditorHost`）；每连接带 tid（`live-client:<tid>`）。
 - **expect_hz**：周期循环填实际频率（建议 20）；**阻塞等待型填 0**（静默不推进 = 正常，探针永不误报 stale）。
 - **未注册也不丢心跳**：`heartbeat` 对陌生名字自动注册（owner=`<auto>`）——但仍要求显式 register（owner/note 给人和 agent 看）。
 - **存活判定**：`alive` 字段来自注册时记录的线程对象；`unregistered` 字段列出进程内**未注册的命名线程**（漂移收编清单）。

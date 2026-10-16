@@ -3,7 +3,7 @@
 > 读者: **外部/无上下文的开发者与 agent**（模拟社区生态 — 只有本文件 + 仓库即可开工）。
 > 架构背景: `extension_protocol.md`（三层高度模型 / 三档侵入 / 兼容机制）。
 > 状态: **M0 已实装 + M1 部分实装**（`ctx.ui.register_window` 2026-10-11；
-> 官方示例 = `Functions/SerialParallelDevice`（设备 IO）与 `Functions/EEGDevice/Gtec`（实时监视面板））；
+> 官方示例 = `Functions/SerialParallelDevice`（设备 IO + 监视面板））；
 > M1+ 剩余能力在本文件中以 `[M1 待]` 标注（当前为设计约束, 实装后按其验收）。
 
 ---
@@ -20,7 +20,6 @@
 | `sigproc` | `Functions/SignalProcess/` | skeleton（可装载样例） |
 | `bci` | `Functions/BCIAlgorithm/` | partial（内核算已实现, 待迁移） |
 | `device` | `Functions/SerialParallelDevice/` | partial（设备 IO 已实现, 面板待做） |
-| `gtec` | `Functions/EEGDevice/Gtec/` | partial（服务进程 + **实时监视面板已实现**; 节点迁移待做） |
 
 ## 2. 快速上手（最小扩展）
 
@@ -84,7 +83,7 @@ engine-editor-cli call ext.mything.info                # 扩展 op 直接可调�
 - 所有对外贡献**强制命名空间**: ops = `ext.<id>.<name>`; 未来节点 = `ext.<id>.<TypeName>`。
 - 私有实现文件不限; 资源放扩展目录内（只读）; 可写数据一律用 `ctx.data_dir`。
 - **同目录私有模块**: 加载器会把扩展目录加入 `sys.path` → 可直接裸 `import <module>`
-  （`gtec_display` / `gtec_scope` 即此模式）; **不要**用包相对导入（扩展不是包）;
+  （扩展目录内的私有子模块即此模式）; **不要**用包相对导入（扩展不是包）;
   机制标注 M0, 打包期可能收窄, 以本节为准。
 - **可导入的引擎面**（白名单, 与审查器 **C6** 同源 — 以审查器为准）:
   `Application.Core.Extension` / `Application.Functions`（设备门面等）/
@@ -137,11 +136,11 @@ rescan:  已装载者全部 unload 后重新扫描（Extensions 菜单 ▸ Resca
 | `ctx.settings(schema)` | `[M1]` | schema 化设置（自动 UI + 持久化）；落地后**页面注册进 Settings 面板**（与 `Common`/`Export` 同级 — 宿主侧已就绪: `SettingsPanel.register_page` / `unregister_pages_by_owner`，见 `Doc/Dev/ui_protocol.md` §13） |
 | `ctx.threads / ctx.jobs / ctx.bus` | `[M2]` | 受管线程 / 后台任务 / 数据总线 |
 | `ctx.ui.post(fn)` | `[M1]` | 后台线程 → 渲染线程帧安全点 |
-| `device`（能力键, **非** ctx 对象） | ✅ M0 | 语义 = **允许导入设备门面** `Application.Functions.EEGDevice`（在 C6 白名单内）；**不提供 `ctx.device`**（不扩大 API 面）; 三模式（sim/device/virtual）与无硬件验收通道见 `Doc/Dev/device_io_protocol.md` §8/§11 |
+| `device`（能力键, **非** ctx 对象） | ✅ M0 | 语义 = **允许导入设备门面** `Application.Functions.EEGDevice`（在 C6 白名单内）；**不提供 `ctx.device`**（不扩大 API 面）; 三模式（sim/device/virtual）与无硬件验收通道见 `Doc/Dev/device_io_protocol.md` §7 |
 | `ctx.graph`（能力键 `graph`） | ✅ M1 (2026-10-12) | **受限图访问** — 面板 ↔ 场景节点同步的官方通道（“在这里点一下, 场景里就改好了”）。仅三件事: `nodes()`（深拷贝快照）/ `find(prop, equals=None, prefix=None)` / `set_props(node_id, fields)`；无删除/新增/连边。**不 import 编辑器层**（`Application/Editor/Extensions/ExtensionGraph.py` 代转发到编辑器单一入口）。未声明 `graph` 时 `ctx.graph is None` |
 
 > 能力键 `device` 与其它行的区别: 前几行是"宿主注入的 ctx 能力对象", `device` 是**导入许可声明**
-> （2026-10-12 裁决 — 见 `Doc/Dev/community_feedback_gtec_2026-10-12.md` §6）。
+> （2026-10-12 裁决）。
 
 未实装能力对应的 ctx 属性为 `None` — 扩展必须做能力检测（`if ctx.ui is None: ...`）。
 
@@ -175,7 +174,7 @@ rescan:  已装载者全部 unload 后重新扫描（Extensions 菜单 ▸ Resca
    链式写法与 `io = imgui.get_io(); io.x = …` 别名写法, 2026-10-12 加固）、`io/style` 赋值;
    只读查 `io.display_size` 与窗口内 `push_style_*` 允许）; 主应用与扩展示例同源守卫
    `Test/Application/Editor/test_imgui_stack_pairing.py`（含规则自检 + 早退补偿计数）。
-   运行期回归: `test_gtec_extension.py` 全裁剪段（裸 imgui 0×0/1×1 绘制帧）。
+   运行期回归: 扩展侧自测（裸 imgui 0×0/1×1 绘制帧不崩）。
    崩溃定位指引与上游材料: `Doc/Dev/upstream_imgui_beginchild_fullclip.md`。
 
 **文本安全（imgui 字面量 — 2026-10-11, "?" 现象根治）**:
@@ -280,13 +279,6 @@ C1/C2 检查基类与实现、C3 检查 close_policy 声明（检查项全表见
 > **接手维护该扩展的 agent 入口**: `Functions/SerialParallelDevice/HANDOFF.md`（交接书: 边界/裁决/坑/下一步/验收）
 > + `HANDOFF_PROMPT.md`（可直接粘给新会话的启动提示词）。
 
-**第二个官方示例** =
-`Functions/EEGDevice/Gtec/`（Gtec 实时监视面板 — 节流拉取实时数据管线 / 示波器绘制 /
-**观察 vs 采集分离（watch/record 会话两段式）** / 软件实时滤波（谐波陷波·频带预设·阶数） /
-**电极阻抗视图（空闲操作）** / 采集落盘 / **品牌服务自动拉起**（面板 Svc python 字段 — 自有环境
-python + 动态端口） + `ext.gtec.*` **12 件套 op**（含 `service` 探针）;
-含窗口栈配对纪律与脏检查设置的活参考）。
-
 ## 8. 节点包规范（`[M1]` 设计）
 
 开发者只提交**声明**，ExtensionManager 翻译到引擎既有五注册点（`node_editor_protocol.md`）：
@@ -337,7 +329,7 @@ python + 动态端口） + `ext.gtec.*` **12 件套 op**（含 `service` 探针�
 
 ### 9.4 迁移指引（从核心抽出）
 
-把现有核心 op 迁移到扩展时的步骤（例: 未来的 `ext.gtec.*`）：
+把现有核心 op 迁移到扩展时的步骤（例: 未来的 `ext.device.*`）：
 1. 在扩展内实现 handler（纯函数; 返回值 JSON 可序列化）;
 2. `ctx.ops.register` 注册新名; 核心侧旧名保留一版转发或标记 deprecated;
 3. 更新 `ui_protocol.md` §10（该表只管核心 op; 扩展 op 由 `extension.list` 呈现）;
@@ -392,7 +384,6 @@ python + 动态端口） + `ext.gtec.*` **12 件套 op**（含 `service` 探针�
 | `ctx.ui.register_window` + ExtensionUI 桥 + **官方示例扩展**（device 监视面板 — 含真实串口闭环与侵入风险审查） | ✅ M1 部分 (2026-10-11) |
 | **窗口生命周期完备性**（close_policy / on_ui_event / `UIExtensionBase` 语言层强制 / 挂起停用队列）+ ExtensionKit 审查器 v0 | ✅ M1 (2026-10-11) |
 | UI 剩余（command/kit/post）· 节点包 · 设置（schema 化） | `[M1 待]` |
-| **Gtec 实时监视面板样例**（观察/采集分离 + 阻抗视图 + 波形/显示滤波/录制 + `ext.gtec.*` 11 件套 op） | ✅ M1 (2026-10-12) |
 | 线程/任务/总线受管模型 · ThreadRegistry 集成 | `[M2]` |
 | 外部目录安装（.mgext）· 脚手架 `ext-init` · 示例扩展 · 贡献审计 · 边界测试全套 | `[M3]` |
 | 依赖拓扑 requires · 热重载（dev）· 扩展 op 超时声明 | `[M3+]` |

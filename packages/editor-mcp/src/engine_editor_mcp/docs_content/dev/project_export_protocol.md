@@ -128,7 +128,7 @@ load_scene_from_file` 以及 `ProjectManager._load_all_scenes` 都必须维护 `
       （提交点拷入 / 克隆持久化 / 缺失识别 / 重开绑定）；
 - [ ] 概率回归（heavy）：`Test/Application/stress/test_material_cycle_stress.py`
       —— 预期 stable/edit/shift 0 失败 0 漂移；legacy 为已知脏数据不复原；
-- [ ] 回归：`FlyVibing-User-And-Developer-Utils/packages/node-editor/test_smoke.py`、`Test/Application/Functions/test_gtec_device.py` 不回归。
+- [ ] 回归：`FlyVibing-User-And-Developer-Utils/packages/node-editor/test_smoke.py`、`Test/Application/Functions/test_siggen_device.py`、`test_device_alias.py` 不回归。
 
 ---
 

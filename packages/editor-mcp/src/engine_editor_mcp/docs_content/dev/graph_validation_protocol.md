@@ -48,7 +48,7 @@ scene 文件格式（`{"scene": {"node_graph": ...}}`）由 `extract_graph_data`
 | `link_endpoint` / `link_direction` / `duplicate_link` / `malformed_link` | error | 连线端点/方向/重复/结构错误 |
 | `isolated_node` | **warning** | 孤立节点（可能是刻意保留 — 离线版为 error, 内化时降级） |
 | `required_pin_unconnected` | error | 必连引脚（当前仅 `Branch.Condition`） |
-| `gtec_pairing` / `siggen_pairing` | error | 设备 Init/Kill 强制配对（规则源: `graph_constraints.*_pairing_errors`） |
+| `siggen_pairing` | error | 设备 Init/Kill 强制配对（规则源: `graph_constraints.*_pairing_errors`） |
 | `pool_pairing` / `pool_reference` | error | 设备池 Create/Kill 配对 + Add/设备引用池校验（`pool_pairing_errors` / `pool_reference_errors`） |
 | `device_pin_unconnected` / `device_pin_source` / `device_multi_pool` | error | AddToDevicePool.device pin: 未连 / 来源非 Init*Device / 一设备多池连线（单池成员制） |
 | `epoch_reference` | error | Epoch 数据集引用（Count/Clear/Save 的 epochs_name 未命中画布源 / 空名多源歧义） |
@@ -64,7 +64,7 @@ scene 文件格式（`{"scene": {"node_graph": ...}}`）由 `extract_graph_data`
 - fake-time: 默认 `dt=1/60`、`frames=360`（6s 模拟），逐帧 `trigger("OnFrameUpdate")`，前后触发 `OnGameStart` / `OnGameStop`；
 - **确定性**: 开始时重置全局随机种子（`evaluators.math.seed_global_rng(seed)`, 默认 0）——同图同参 → 同日志；
 - **副作用隔离**: `ExecutionContext.dry_run=True`（设备走 stub 后端、实体/IO 副作用转 emit_log）；
-- **会话隔离**: 干跑中的设备会话统一 `dryrun#` 前缀（`evaluators/gtec.py`）；设备池共用同一命名空间（`evaluators/device_pool.py`），任务结束自动 `kill_device` + `destroy_pool` 清理；
+- **会话隔离**: 干跑中的设备会话统一 `dryrun#` 前缀（`evaluators/siggen.py`）；设备池共用同一命名空间（`evaluators/device_pool.py`），任务结束自动 `kill_device` + `destroy_pool` 清理；
 - **取消**: `cancel_event` 帧间检查 → 报告 `state="cancelled"`；
 - ExitGame 被触发时提前收敛（记录 `exit_game_frame`）。
 

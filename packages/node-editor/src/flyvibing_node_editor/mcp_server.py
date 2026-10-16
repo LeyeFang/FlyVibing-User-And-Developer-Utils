@@ -43,7 +43,7 @@ mcp = FastMCP("Node Graph Editor", version="0.2.0")
 def get_rules(section: str = "") -> str:
     """节点图参考（渐进披露, 默认只回目录 — 省 token）。
 
-    无参 = 目录（各节标题与规模）; section="<标题>" 取该节（子标题可单独取, 如 "Gtec"）;
+    无参 = 目录（各节标题与规模）; section="<标题>" 取该节（子标题可单独取, 如 "SigGen"）;
     section="all" = 全文。CLI: python -m flyvibing_node_editor.cli rules
     """
     try:

@@ -138,7 +138,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("rules", help="参考文档: 无参=目录; section=单节; --all=全文")
-    p.add_argument("section", nargs="?", default="", help='节标题（如 "Gtec" / "build_graph Spec"）')
+    p.add_argument("section", nargs="?", default="", help='节标题（如 "SigGen" / "build_graph Spec"）')
     p.add_argument("--all", action="store_true", help="输出全文（谨慎: 约 1 万字符）")
     p.add_argument("--out", help="写入文件（只回摘要 JSON）")
     p.set_defaults(func=cmd_rules)

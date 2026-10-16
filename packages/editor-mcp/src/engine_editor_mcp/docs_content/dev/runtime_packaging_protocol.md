@@ -14,7 +14,7 @@
 |---|---|
 | 运行时形态 | **双轨制**：主轨 = 导出时预装好的 Python 环境（目标机零安装、免联网）；备轨 = 随包 `wheelhouse/`（离线重建/修复材料） |
 | 解释器来源 | **python-build-standalone**（即 uv 管理的那份 3.14t），整目录可搬运；不复制 `.venv`（venv 含绝对路径不可搬） |
-| gtec 真机 | **随包提供**。pygds 官方无 free-threading 版本 — 由用户 fork 补 `Py_mod_gil` 标记后把 wheel 放入 `Resource/wheels/`；管线将其视为一等公民；缺失时导出**告警不失败** |
+| 设备 SDK 轮子 | 需 free-threading 兼容的第三方设备 SDK wheel 放入 `Resource/wheels/`；管线将其视为一等公民；缺失时导出**告警不失败** |
 | 数据输出 | 默认包内 `output/`，`game.json` 的 `output_dir` 可配置 |
 | 规模取向 | 不在乎体积（科研场景）；宁大勿缺，环境与开发版保持一致 |
 
@@ -142,7 +142,7 @@
 
 ## 7. 已知缺口 / 后续
 
-1. gtec fork wheel 待放入 `Resource/wheels/`（就绪后重跑 collect_wheels + prepare_runtime）。
+1. 品牌设备 SDK wheel（free-threading 兼容）就绪后放入 `Resource/wheels/`（重跑 collect_wheels + prepare_runtime）。
 2. `fullscreen` 窗口模式尚未实现（`window.mode` 已预留）。
 3. 自定义资产（mesh/texture/shader）导入不持久化（`project_export_protocol.md` §7.5）——
    用到它们的实验包会缺资源；打包前会强告警。

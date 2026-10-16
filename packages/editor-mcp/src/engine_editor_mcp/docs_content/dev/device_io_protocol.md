@@ -1,6 +1,6 @@
 # 设备 IO 层开发协议（Application/Functions）
 
-> 适用：`SerialParallelDevice`（串口/并口）、`EEGDevice`（g.tec g.HIamp）等硬件集成。
+> 适用：`SerialParallelDevice`（串口/并口）、`EEGDevice`（EEG 设备族：品牌服务进程 + 虚拟信号发生器等）等硬件集成。
 > 节点求值器如何调用设备见 `node_editor_protocol.md`；UI 控件见 `ui_protocol.md`。
 
 ---
@@ -10,7 +10,7 @@
 | 模块 | 架构 | 要点 |
 |---|---|---|
 | `Functions/SerialParallelDevice/` | 全局单例 + I/O 线程 + 队列 | `api.py`（start/stop/send/write_parallel）、`io_thread.py`、`state.py`、`test_hooks.py`；无驱动优雅降级；5ms 自动复位 |
-| `Functions/EEGDevice/` | 会话注册表 + 后端协议 + 环形缓冲 + **品牌服务进程** | `Device.py`（后端无关：配置/缓冲/会话/注册表/落盘）、`ServiceProtocol/ServiceHost/ServiceClient.py`（品牌进程通信，见 §8）、`Gtec/`（品牌目录：真实 pygds + 服务入口; 自有环境）、`VirtualDevice/`（品牌目录：虚拟信号发生器 + 服务入口; 引擎环境）、`eCon/`（品牌目录：念通科技 econEXG 预留）、`__init__.py`（门面路由） |
+| `Functions/EEGDevice/` | 会话注册表 + 后端协议 + 环形缓冲 + **品牌服务进程** | `Device.py`（后端无关：配置/缓冲/会话/注册表/落盘）、`ServiceProtocol/ServiceHost/ServiceClient.py`（品牌进程通信，见 §7）、`VirtualDevice/`（品牌目录：虚拟信号发生器 + 服务入口; 引擎环境）、`eCon/`（品牌目录：念通科技 econEXG 预留; 自有环境）、`__init__.py`（门面路由） |
 
 共同约束：
 - **不得反向依赖 Engine / Editor**；被求值器（`Application/Core/NodeGraph/evaluators/*`）调用。
@@ -22,12 +22,12 @@
 ## 2. 真实 / 空跑双后端契约（本层核心，MCP 空跑依赖）
 
 - 后端接口：`DeviceBackend`（`configure / start / stop / close / pump / info`）。
-- 空跑后端（`GtecStub`）规则：
+- 空跑后端（设备族 stub）规则：
   - 不触硬件、不落盘、不起线程（`pump` 同步补齐数据）；
   - **确定性**：同一时间轴 → 同一数组（干跑可复现）；
   - 合成总量封顶为窗口容量（避免长时间干跑占内存）；
   - 通过 `on_block` 走**与真实后端相同的数据通路**（环形缓冲/全量录制逻辑一并被验证）。
-- 选择方式：门面 `_make_backend` 路由 —— 干跑（`ctx.dry_run=True`）走进程内确定性后端（GtecStub / Virtual dry，无进程零副作用）；真实模式默认走**品牌服务进程**（独立进程 + 协议通信，见 §8）；逃生门 `MGE_EEG_TRANSPORT=inproc` 退回进程内真实后端。
+- 选择方式：门面 `_make_backend` 路由 —— 干跑（`ctx.dry_run=True`）走进程内确定性 stub 后端（无进程、零副作用）；真实模式默认走**品牌服务进程**（独立进程 + 协议通信，见 §7）；逃生门 `MGE_EEG_TRANSPORT=inproc` 退回进程内真实后端。
   **真实模式绝不回退 stub**（防实验数据污染），干跑才走 stub。
 - 新增设备时同步实现两套后端 + 在 `Doc/Dev/README.md` §3 的验收命令下跑通。
   **纯软件设备例外**（如 `SigGen` — 虚拟信号发生器）：单一后端 + 构造参数 `dry_run` 控制
@@ -37,11 +37,11 @@
 
 ## 3. 数据与落盘约定
 
-- 单位/类型：g.HIamp 数据为 **float32、µV**（GDS 已定标）。
+- 单位/类型：设备数据统一为 **float32、µV**（SDK/驱动已定标）。
 - **窗口缓冲**：形状 `(channels, capacity)`，`capacity = buffer_seconds × fs`（上限
   `MAX_BUFFER_SAMPLES = 4e6`/通道）；环形写入、旧数据覆盖；快照按时间序，未填区 = 0，
   有效样本数单独给出（`samples`）。
-- **导出文件**：形状 `(samples, channels)`（与 GtecAPI 脚本一致，便于 np.load/MNE 复用）。
+- **导出文件**：形状 `(samples, channels)`（便于 np.load/MNE 复用）。
   - `npz`：keys = `data / fs / channel_names / serial / duration_s`（压缩）；
   - `csv`：首行 `sample,<ch names...>`，行 = 采样点；
   - 两种格式都附同名 `.json` 元数据（设备信息、滤波器索引、起止时间、模式 stub/device、文件清单）。
@@ -66,35 +66,16 @@
 
 ---
 
-## 5. g.tec g.HIamp 实机要点（pygds）
-
-- 环境：引擎 venv 需装 g.tec 官方 `pygds` wheel（+ cffi/pywin32/matplotlib）；Windows 服务
-  **GDS** 必须运行；设备不得被 g.Recorder / g.SCOPE 占用。参考 `C:\WorkSpace\FLY\GtecAPI\`。
-- `pygds` **必须懒导入**（真实路径内），import 会连带 matplotlib/pywin32 —— 干跑机器无此依赖。
-- pygds 1.24.0 bug：`GDS(DEVICE_TYPE_*)` 抛 `UnboundLocalError`，**必须传序列号字符串**。
-- 采样率：256/512/600/1200/2400/4800/9600/19200/38400；`NumberOfScans` 用
-  `GetSupportedSamplingRates()[rate]`；用户块 = 整数个设备块（默认 ~100ms）。
-- Trigger：**固定启用**（16 条数字线合并为 1 个附加通道，"combine"）；计数器/Hold 关闭。
-- 滤波器是**离散预设**（`GetNotchFilters` / `GetBandpassFilters`，按采样率分组）；
-  匹配用容差查找，匹配不到 → 跳过 + 告警（不阻塞采集）。截止频率语义（0=未填、
-  类型不匹配忽略）在 `Device.GtecConfig.effective_filters()` 中定义并被测试覆盖。
-- 通道：`GetAvailableChannels(combine=False)` 才是硬件真实可用性（`combine=True` 会 AND
-  `Acquire` 标志，直读可能"只有 16 通道"）；阻抗测量要求通道 1 接 GND，且通道采样后
-  前 1s 为 DC 建立瞬态（分析时丢弃）。
-- 元数据：`d.GetDeviceInformation()` 多行字符串进 JSON `<dev_info>`。
-
----
-
-## 6. Runtime 集成
+## 5. Runtime 集成
 
 - `GameRuntime.start()`：清理上次残留 EEG 会话（异常退出保护）；`stop()` 末尾再次
-  `close_all()`（图内 `OnGameStop` 链（含 StopGtecRecord/KillGtecDevice）已执行完，此处兜底）。
-- PIE 重复运行：同名 `InitGtecDevice` 会**替换**旧会话（门面内先 kill 再注册）。
+  `close_all()`（图内 `OnGameStop` 链（含设备 Stop/Kill 节点）已执行完，此处兜底）。
+- PIE 重复运行：同名设备 Init 会**替换**旧会话（门面内先 kill 再注册）。
 - 图内生命周期（Init→Start→Get…→Stop→Kill）与 Runtime 安全网是两层保障，缺一不可。
 
 ---
 
-## 7. 设备池 (Device Pool)
+## 6. 设备池 (Device Pool)
 
 设备池 = 设备的分组 / 生命周期 / (未来) 进程组与同步域锚点（模块级注册表, `Device.py`）。
 
@@ -110,15 +91,15 @@
 - 键规则单点定义在 `graph_constraints`（`device_session_key` / `pool_key`），
   评估器 / 校验器 / UI 下拉三处共用，禁止另写变体。
 - 干跑隔离：池与会话共用 `dryrun#` 命名空间，任务结束由 `validation/dry_run.py` 一并清理。
-- **品牌目录布局（2026-10-03 已落地）**：`Functions/EEGDevice/{Gtec, eCon, VirtualDevice}/` 三个品牌目录
-  —— **一个品牌（一个 API）= 一个独立文件夹 + 独立环境**（Gtec/eCon 自有环境；VirtualDevice 用引擎
-  环境）；品牌 = 独立进程文件应用（后端 + `service.py`，见 §8）。导出**按需包含**：项目未引用某品牌时，
+- **品牌目录布局（2026-10-03 已落地）**：`Functions/EEGDevice/{VirtualDevice, eCon}/` 品牌目录
+  —— **一个品牌（一个 API）= 一个独立文件夹 + 独立环境**（VirtualDevice 用引擎环境；eCon 自有
+  环境）；品牌 = 独立进程文件应用（后端 + `service.py`，见 §7）。导出**按需包含**：项目未引用某品牌时，
   其目录（含未来成品环境）不随导出。设备池 = 进程组管理单元（池条目 `meta` 预留进程句柄/启动参数）。
   延伸规则：`Functions/` 下未来一律按**终端可安装的可选拓展**演进（仅备忘，暂不施工）。
 
 ---
 
-## 8. 品牌服务进程（独立进程 + 协议通信）
+## 7. 品牌服务进程（独立进程 + 协议通信）
 
 品牌目录 = 独立进程文件应用：后端实现 + `service.py` 入口 +（未来）随目录携带的环境。
 引擎与品牌之间只经一条协议通信，节点图侧零改动。
@@ -133,29 +114,25 @@
   `push`（真实硬件——start 后采集线程持续推送，引擎接收线程写会话环形缓冲）。
 - **保存仍在引擎侧**：服务只提供数据；npz/csv/元数据落盘逻辑与进程内完全一致。
 - **生命周期**：VirtualDevice 引擎自动拉起（`sys.executable`，引擎环境，动态端口，日志在系统 temp）；
-  Gtec **三级路由**（2026-10-15）: `MGE_GTEC_SERVICE=host:port` 显式连接 →
-  `MGE_GTEC_PYTHON` / 设备配置 `service_python`（自有环境 python）**自动拉起**（动态端口，断开回收子进程）→
-  否则直连默认 127.0.0.1:47810（**3s 快速失败** + 启动指引）；
+  外部品牌服务**三级路由（2026-10-15 模式）**: 显式端点（`MGE_EEG_SERVICE=host:port`）连接 →
+  设备配置 `service_python`（自有环境 python）**自动拉起**（动态端口，断开回收子进程）→
+  否则直连默认端口（**3s 快速失败** + 启动指引）；
   客户端断开 → 服务退出（引擎崩溃自动清理）；`kill/close` 发 shutdown 并回收子进程。
 - **连通失败诊断**：报错含启动提示 + 服务日志尾部（自动拉起场景）；
   两阶段失败点显式区分（2026-10-15 实战教训）——`cannot connect ...` = 服务没起（A: 自动拉起 / B: 手动启动），
-  `init failed ...` = 服务已起但设备被占用（如 g.Recorder），两者文案各不相同。
-- **服务探针**：`probe_gtec_service()`（1.5s 只读探测）+ `ext.gtec.service` op（面板/agent 排障入口）。
-- 验证：`Test/Application/Functions/test_eeg_service.py`（26 checks: 往返（含 `impedance` 命令）/确定性/
-  端到端保存/逃生门/进程清理 + Gtec 3.9 跨版本握手 + probe/自动拉起链——不触硬件）。
-- 已验（2026-10-15 实机）: g.HIamp 自动拉起服务 → 观察/采集/落盘（65 列含 TRIG）/阻抗 → 释放 全链通过。
-- 待办：电极帽阻抗质量数据（实机链路已通）、PIE start/stop 的 `close_all` 与会话联动政策、品牌目录随环境打包（规划见 §7）。
+  `init failed ...` = 服务已起但设备被占用（如厂商软件独占），两者文案各不相同。
+- **服务探针（模式）**：品牌服务应提供秒级只读连通探测（无副作用），供面板/agent 排障（新品牌落地时随服务实现）。
+- 待办：PIE start/stop 的 `close_all` 与会话联动政策、品牌目录随环境打包（规划见 §6）、
+  服务协议无头回环测试随新品牌服务落地重建（原测试已随品牌调整归档）。
 
 ---
 
-## 9. 测试
+## 8. 测试
 
 ```powershell
-.venv-py314t\Scripts\python.exe Test/Application/Functions/test_gtec_device.py        # 设备层 + 干跑 + 约束 + 真机 TRIG 列 (57 checks)
-.venv-py314t\Scripts\python.exe Test/Application/Functions/test_siggen_device.py      # 虚拟信号发生器 (配置/会话/落盘/干跑/配对)
+.venv-py314t\Scripts\python.exe Test/Application/Functions/test_siggen_device.py      # 设备族（虚拟信号发生器: 配置/会话/落盘/干跑/配对）
 .venv-py314t\Scripts\python.exe Test/Application/Functions/test_serial_parallel_device.py
-.venv-py314t\Scripts\python.exe Test/Application/Extensions/test_gtec_extension.py    # 监视面板扩展 (DSP/ops/watch-record/阻抗/探针/全裁剪栈平衡, 92 checks)
-# 实机 (需引擎运行中): Test/Application/Extensions/e2e_gtec_monitor_check.py          # watch/record + 滤波 + 阻抗 + virtual 录制 + 真实 g.HIamp 段, 47 checks
+.venv-py314t\Scripts\python.exe Test/Application/Functions/test_device_alias.py       # 逻辑设备名（@alias 跨机器）
 ```
 
 - 干跑用例必须断言：静态校验零错误、`events_by_type` 覆盖全链路节点、干跑后注册表为空。
@@ -163,7 +140,7 @@
 
 ---
 
-## 10. 已知坑（实战教训）
+## 9. 已知坑（实战教训）
 
 1. 空跑 pump 时序（§4）—— 顺序错误的症状是"数据全 0 / valid=0"。
 2. 真实模式不得伪造数据（§2）—— 采集失败要显式报错，宁缺毋假。
@@ -179,57 +156,7 @@
 
 ---
 
-## 11. 监视面板（扩展 `ext.gtec` — 2026-10-12, 同上日升级）
-
-类经典信号工具的实时观察面板（`Functions/EEGDevice/Gtec/`；M1 参考实现 — 见
-`Doc/ExtDev/extension_dev_protocol.md`）: **观察/采集分离 / 实时波形 / 软件实时滤波 /
-电极阻抗 / 采集落盘**。
-
-- **观察 vs 采集（会话两段式, Device.py 状态机）**: `watch` = monitoring（流式 + 环形缓冲，
-  **不累积**全量录制）；`record` = recording（监视基础上累积，Stop 落盘）；监视中 `record`
-  升级 = 从此刻起录（`session.begin_recording`）。`stop` 自动判别（录制→保存；监视→无落盘），
-  `save=false` 显式弃录。节点侧 `start_record` 默认 `record=True` 保持旧语义（兼容红线）。
-- **数据通路与节点图同源**: Watch/Record → facade `start_record`（device=品牌服务 push /
-  virtual=pump / sim=进程内 stub）；面板 ~25 Hz 节流拉取 `session.get_data(elapsed)`
-  （环形缓冲锁内只读拷贝）→ 显示滤波（因果 IIR，滑窗+预热余量，无跨帧状态）
-  → min/max 抽取列 → 绘制（点列按版本缓存）。面板**绝不直接触碰设备 API**。
-- **三种模式**: `sim`（进程内 GtecStub — 确定性合成，窗口容量封顶，不落盘）/ `device`
-  （Gtec 服务 — **自动拉起**（面板 Svc python / `MGE_GTEC_PYTHON`，动态端口）或连接外部已运行
-  服务（`MGE_GTEC_SERVICE` / 默认 47810），push — 真实 g.HIamp）/ `virtual`（引擎自动拉起
-  VIRTUAL 服务 — 连续合成，Stop 真实落盘；无硬件环境下验证完整录制链路的推荐通道）。
-  连接失败 = 显式报错（服务没起 vs 设备占用两阶段区分 + 启动指引），绝不静默回退 stub。
-- **电极阻抗**（`ext.gtec.impedance` + 面板 Impedance 视图页）: 门面 `measure_impedance`
-  → 后端 `get_impedance`（真机 = pygds `GetImpedanceEx(etype, tms_box, first=True)`，单位 Ω;
-  sim/virtual = 确定性合成演示值，`simulated` 标记）。**空闲操作**: 流式采集中会话层拒绝。
-  阈值（`classify_impedance`，来源 GtecAPI docs/api_summary）: 被动 <7.5 / 7.5–20 / >20 kΩ,
-  主动 <65 / 65–200 / >200 kΩ; 通道 1 恒 NaN（硬件特例）→ n/a。服务协议新增 `impedance` 命令
-  （ServiceHost/ServiceClient; 实机验证 2026-10-15 通过 — 设备返回 256 值裁剪至会话通道、
-  负值/NaN 哨兵 → n/a; 电极帽质量数据待做）。
-- **显示滤波选项 v2**: 陷波 `off|50|60|50+100|60+120`（谐波组合 = 成级联）; 频带预设
-  （broadband 0.5-45/0.5-100, delta/theta/alpha/beta/gamma, hp/lp）或 custom; IIR 阶数 2/4。
-  显示滤波 ≠ 设备滤波: 前者 = 面板软件链（随时可改，即时生效）；后者 = g.HIamp 硬件预设
-  （Open 时下发，改后需重开会话）。显示滤波为**因果、非零相位**（实时工具语义；离线分析用
-  `Functions/SignalProcess`）。
-- **落盘**: Stop(save) → 引擎侧 npz/csv + json 元数据 — 与节点族完全同一条实现
-  （`session/buffer` scope 可选；sim 模式为干跑语义，只算路径不写盘）。
-- **真机 TRIG 列**（2026-10-15）: 硬件数据块 = (samples, 65)（64 EEG + 触发合成列 TRIG）；
-  环形缓冲只留 EEG（显示/节点行为不变），**录制保留 TRIG**（npz 65 列 + `channel_names` 含 TRIG +
-  `channels_saved` 元数据）。
-- **agent 通道**: `ext.gtec.{status, open, close, watch, record, start, stop, filters, display,
-  impedance, service, snapshot}` — 全程 JSON、无 UI 可调；`service` = 服务连通探针（排障）;
-  `snapshot` 返回 per-channel mean/rms/ptp +
-  等间隔数值预览（干跑/实机数值断言通道）；`freeze` 冻结显示（不拉新数据，设置变更仅重渲染冻结帧）。
-- **UI 纪律**: 面板绘制在渲染线程帧内、只读快照（dev protocol §7）；imgui 窗口栈配对
-  纪律见 `ui_protocol.md` §2.13（最小化 0×0 全裁剪时 `BeginChild`=False — `EndChild`
-  仍必须调用，否则渲染循环断言崩溃）。
-- 测试: `Test/Application/Extensions/test_gtec_extension.py`（92 checks 无头, 含 watch/record/
-  阻抗/探针/全裁剪）+ GUI 场景 `scenarios/gtec_panel_smoke.py` + 实机 `e2e_gtec_monitor_check.py`
-  （47 checks: sim/virtual/真实 g.HIamp 三段 + 截图产物在 `Test/_runs/gtec_monitor_demo/`;
-  无 GtecAPI 环境时实机段自动 SKIP）；服务协议阻抗闭环在 `test_eeg_service.py`。
-
----
-
-## 12. 两级设备身份与跨机器迁移（`@alias` — 2026-10-12 新增）
+## 10. 两级设备身份与跨机器迁移（`@alias` — 2026-10-12 新增）
 
 **问题**: 场景节点里写死 `COM3`，换机器 / 换 USB 口后设备"找不到"，实验设计被物理拓扑绑死。
 

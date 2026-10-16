@@ -18,7 +18,7 @@
 | `Application/Editor/Locale/*.json` | **语言目录**（单一事实源；`en` = 源语言；新增语言 = 新增一个 JSON 即全链跟随）— 同上协议 |
 | `Application/Editor/UI/panels/MenuBarPanel.py` | 主菜单栏面板（**当前未注册**，保留文件 — 见 `GUI_STRUCTURE.md`）；View 菜单 = 面板开关 + Show Grid（`toggle_grid_visible` 动作单点 → `Grid.set_visible`，与 `view.set_grid` op 同路径）；Extensions 段与 UIManager 共用 `ExtensionMenu.draw_extensions_menu` |
 | `Application/Editor/UI/panels/node_editor/panel.py` | `NodeEditorPanel`：画布渲染、Add 菜单、连线创建、Delete 删除（含级联）、Rearrange 自动布局、Import/Export（经 `Application/Core/NodeGraph/graph_io` 与 agent ops 同源） |
-| `Application/Editor/UI/panels/node_editor/widgets/` | 节点内联控件包 — 注册表在 `core.py`（`@register`）；子模块 flow_io / entity_comp / device_siggen / device_gtec / device_pool / epoch / algorithm，**import 即注册**；设备共用助手在 `device_common.py` |
+| `Application/Editor/UI/panels/node_editor/widgets/` | 节点内联控件包 — 注册表在 `core.py`（`@register`）；子模块 flow_io / entity_comp / device_siggen / device_pool / epoch / algorithm，**import 即注册**；设备共用助手在 `device_common.py` |
 | `Application/Editor/UI/panels/node_editor/visible_pins.py` | 引脚可见性规则注册表（`@rule(node_type)`） |
 | `Application/Editor/UI/panels/node_editor/styling.py` | `MENU_SECTIONS`（Add 菜单数据）、`LINK_COLORS`（按 data_type 着色）、node style 颜色 |
 | `Application/Editor/UI/FileDialog.py` | 异步文件/目录选择（回调写 props） |
@@ -33,11 +33,11 @@
    （允许读静态常量，如 `EEGDevice` 的选项表；禁止打开设备/文件）。
 2. **props 必须可 JSON 序列化**（int/float/str/bool/list/dict）。`NodeCanvas.to_dict()` 会把
    props 写进 `.scene`；写入 numpy 数组/对象引用 → 导出损坏。
-3. **控件 ID 唯一**：所有控件 label 必须带 `##..._{nid}` 后缀（例：`f"Buffer##gtec_buf_{nid}"`）。
+3. **控件 ID 唯一**：所有控件 label 必须带 `##..._{nid}` 后缀（例：`f"Buffer##siggen_buf_{nid}"`）。
    同 label 的两个节点会因 imgui ID 冲突互相串值。
 4. **节点卡内下拉框一律用 `_ne_combo`**（BeginCombo 实现）。`imgui.combo` 在 node editor
    坐标下弹窗会偏移；`_ne_combo` 已封装正确行为。
-5. **默认值在首次绘制时补齐**（幂等，见 `InitGtecDevice` 的设备名、`ComponentAdd` 的组件下拉）；
+5. **默认值在首次绘制时补齐**（幂等，见 `InitSigGenDevice` 的设备名、`ComponentAdd` 的组件下拉）；
    不要每帧无条件改写 props。
 6. **不适用输入用灰显**：`imgui.begin_disabled()/end_disabled()`（例：滤波器截止频率按其类型
    灰显），与求值器的"不生效"语义保持一致。
@@ -63,7 +63,7 @@
     "EndPopup too many times"）；`begin_table` 按其返回值配对。
     **静态拦截**（2026-10-12）：`Test/Application/Editor/test_imgui_stack_pairing.py`
     （core — 反模式自检 + 主应用与 `Functions/**` 同源扫描 + 早退补偿的配对计数），
-    扩展侧同一规则由审查器 C8/C9/C10 执行；运行期回归 `test_gtec_extension` 全裁剪段。
+    扩展侧同一规则由审查器 C8/C9/C10 执行；运行期回归以扩展自测（headless imgui 裸绘制帧）为准。
     崩溃定位指引与上游 issue 材料：`Doc/Dev/upstream_imgui_beginchild_fullclip.md`。
 14. **imgui 布局持久化永久禁用**（2026-10-12 实测裁决）：引擎侧 `EditorImguiLayer.OnAttach`
     以空串禁用 ini（`io.set_ini_filename("")`）—— 实测删文件 → 完整启停编辑器 → 文件不重现，
@@ -98,14 +98,14 @@
 
 - **新增带内联控件的节点类型，必须加入 `panel.py` 的 `_WIDGET_NODES` 集合**，
   否则 Rearrange 后卡片重叠。
-- 卡片高度 ≈ pin 行数 × 24px 与控件高度取大者；控件行数多（如 `InitGtecDevice`）时宁可留白。
+- 卡片高度 ≈ pin 行数 × 24px 与控件高度取大者；控件行数多（如 `InitSigGenDevice`）时宁可留白。
 
 ---
 
 ## 5. 删除交互与级联
 
-- Delete 键删除选中节点/连线；节点删除调用 `gtec_cascade_deletes(canvas, ids)` 先做级联扩展
-  （当前规则：Gtec `InitGtecDevice ⇄ KillGtecDevice` 强制成对；规则函数保持纯数据、无 imgui）。
+- Delete 键删除选中节点/连线；节点删除调用 `device_cascade_deletes(canvas, ids)` 先做级联扩展
+  （当前规则：SigGen `InitSigGenDevice ⇄ KillSigGenDevice` 强制成对；规则函数保持纯数据、无 imgui）。
 - 级联删除必须打印 `[Delete] Cascade ...` 日志，便于排查。
 
 ---
@@ -137,7 +137,7 @@
 
 - UI 交互测试需要 GL 窗口；鼠标/键盘统一走 `InputPipeline`（见 `Test/Application/Editor/测试需知.md`）。
 - **业务正确性不要依赖 UI 测试**：把逻辑放进 evaluators / 设备层，用 MCP 干跑与无头单元测试覆盖
-  （`Test/Application/Functions/test_gtec_device.py` 是范例）。
+  （`Test/Application/Functions/test_siggen_device.py` 是范例）。
 - 场景化 UI 回归：`python Test/Application/Editor/ui_scenario.py scenarios/<name>.py`
   （真实面板 + 输入注入 + PNG 快照，含完整 ImGui 界面；`--preview` 交互预览）。
 - 批量运行 / 档位（core/gui/heavy/live）/ 沙箱与输出契约：`Doc/Dev/test_protocol.md`

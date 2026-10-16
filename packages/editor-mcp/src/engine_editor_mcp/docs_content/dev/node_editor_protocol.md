@@ -25,7 +25,7 @@
 | Agent 参考文档 | `FlyVibing-User-And-Developer-Utils/packages/node-editor/rules.md` | 构图 agent 参考（**按节读取**: get_rules(section=...) / CLI rules; 无参=目录）；含 build_graph Spec 节 |
 | Agent 通道 | `FlyVibing-User-And-Developer-Utils/packages/node-editor/mcp_server.py` + `cli.py` | MCP 4 工具（get_rules(分节) / get_scene_entities / build_graph / apply_graph；`validate_graph` 已移除）; CLI: `python -m flyvibing_node_editor.cli {rules,entities,build,apply}` |
 | 校验器（旧） | `FlyVibing-User-And-Developer-Utils/packages/node-editor/node_graph_validator.py` | L1 静态 + L2 干跑 — **已退场**（仅旧脚本/单元测试复用）；校验单一事实源 = 引擎内服务（`graph_validation_protocol.md`） |
-| 构图器 | `FlyVibing-User-And-Developer-Utils/packages/node-editor/graph_builder.py` | 程序化构图 + `validate()`；节点 helper（gtec_* / siggen_* / pool_* / epoch_* / fbscp_* / cca_* / show_media） |
+| 构图器 | `FlyVibing-User-And-Developer-Utils/packages/node-editor/graph_builder.py` | 程序化构图 + `validate()`；节点 helper（siggen_* / pool_* / epoch_* / fbscp_* / cca_* / show_media） |
 
 > 旧路径 `Application/Editor/UI/controllers/node_editor/` 仅保留包级 re-export shim（弃用）；
 > 新代码一律使用上表路径。
@@ -90,19 +90,19 @@ if ctx.dry_run:
   （`validate_graph` 汇总 `events_by_type` / `by action`，测试可断言）。
 - **禁止**在干跑中：开线程、开设备、写文件、改真实场景、导入重依赖。
 - 真实模式失败要**记录并继续**（`emit_log(..., "error", ...)` + print），不得向上抛异常
-  （否则整帧执行中断）。参考 `evaluators/gtec.py` + `Functions/EEGDevice` 空跑后端的写法。
-- 纯数据节点（如 GetGtecData）干跑中只有在输出**被读取**时才会求值 —— 测试/校验图要保证
+  （否则整帧执行中断）。参考 `evaluators/siggen.py` + `Functions/EEGDevice` 空跑后端的写法。
+- 纯数据节点（如 GetSigGenData）干跑中只有在输出**被读取**时才会求值 —— 测试/校验图要保证
   至少有一条数据连线消费它的输出，否则不会出现在干跑事件里。
 
 ---
 
 ## 5. 图约束（graph_constraints.py 模式）
 
-- 业务规则示例：Gtec `InitGtecDevice ⇄ KillGtecDevice` 强制成对；设备池 `CreateDevicePool ⇄
+- 业务规则示例：`InitSigGenDevice ⇄ KillSigGenDevice` 强制成对（设备族）；设备池 `CreateDevicePool ⇄
   KillDevicePool` 同样成对（外加 `device` pin 连线校验与单池成员制，见 `validation/checks.py` §8/§9）。
 - 两部分配套实现：
   - `*_cascade_deletes(canvas, ids)`：编辑器删除时扩展为级联删除集合（UI 调用；
-    `device_cascade_deletes` = Gtec ∥ SigGen ∥ Pool 并集）。
+    `device_cascade_deletes` = SigGen ∥ Pool 并集）。
   - `*_pairing_errors(nodes_dict)`：静态校验错误列表（`node_graph_validator.validate_static` 调用；
     另有 `pool_reference_errors` 校验池引用）。
 - 键规则单点化：`device_session_key` / `pool_key` 由评估器 / 校验器 / UI 三处共用，禁止另写变体。
@@ -115,8 +115,8 @@ if ctx.dry_run:
 
 - **干跑全链路**（零硬件零 UI）：`GraphBuilder` 构图 → `validate_static()` → `g.validate(max_frames=N)`
   → 断言 `report.passed` 且 `dry_run["events_by_type"]` 含预期节点。
-  范例：`Test/Application/Functions/test_gtec_device.py::test_graph_dry_run`。
-- 约束测试：纯 dict 调 `gtec_pairing_errors`；`NodeCanvas` + `gtec_cascade_deletes` 测级联。
+  范例：`Test/Application/Functions/test_siggen_device.py::test_graph_dry_run`。
+- 约束测试：纯 dict 调 `siggen_pairing_errors`；`NodeCanvas` + `device_cascade_deletes` 测级联。
 - 边界守卫（改动节点图包后必跑）：`python Test/Application/Core/test_node_graph_boundary.py` —
   源码扫描禁止 `Application.Editor` / `imgui_bundle` 导入，且阻断导入时运行时链路必须仍可导入。
 - 迭代开发时可直接用 Pylance 代码片段工具跑无头断言（无需落盘测试文件）。
@@ -132,7 +132,7 @@ if ctx.dry_run:
 3. **pin_ids 是实例级**：JSON 连线引用 `inst.pin_ids`（画布/导入导出/MCP 均如此），
    手写图时给每 pin 分配全局唯一数值；重复会导致连线错乱。
 4. **事件节点 pin 名是 `exec`**：`chain()` 对事件节点不适用，直接 `link(GS, "exec", ...)`。
-5. **重依赖 import 副作用**：`pygds` import 会连带 matplotlib/pywin32；设备后端必须懒导入，
+5. **重依赖 import 副作用**：设备 SDK/串口驱动 import 可能连带原生依赖；设备后端必须懒导入，
    否则 MCP 干跑在无设备机器上直接崩。
 6. **自由线程（-Xgil=0）下的数据竞争**：跨线程共享结构必须加锁（见 device_io_protocol §4）；
    实机采集中"图线程读缓冲 / 采集线程写缓冲"是典型场景。

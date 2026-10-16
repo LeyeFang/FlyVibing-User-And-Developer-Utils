@@ -27,12 +27,12 @@ description: "构建/修改 .scene 里的实验节点图（离线通道 — 不�
 ```powershell
 python -m flyvibing_node_editor.cli rules                # 目录（各节标题+规模）— 先看这个
 python -m flyvibing_node_editor.cli rules "Connection Rules"
-python -m flyvibing_node_editor.cli rules "Gtec"         # 子标题可单独取
+python -m flyvibing_node_editor.cli rules "SigGen"       # 子标题可单独取
 python -m flyvibing_node_editor.cli rules "build_graph Spec"
 python -m flyvibing_node_editor.cli rules --all --out rules_full.md   # 只在真需要全文时（落盘+摘要）
 ```
 
-MCP 等价: `get_rules()`（目录）/ `get_rules(section="Gtec")` / `get_rules(section="all")`。
+MCP 等价: `get_rules()`（目录）/ `get_rules(section="SigGen")` / `get_rules(section="all")`。
 
 ## 2. spec → 图 → scene（一条龙）
 
