@@ -62,7 +62,11 @@ def _read(path: str) -> str:
 
 def _doc_title(text: str, topic: str) -> str:
     m = re.search(r"^#\s+(.*)$", text, re.MULTILINE)
-    return m.group(1).strip() if m else topic
+    title = m.group(1).strip() if m else topic
+    head, sep, tail = title.partition(" — ")  # 去 "xxx_protocol.md — " 文件名前缀
+    if sep and head.endswith(".md"):
+        return tail.strip() or title
+    return title
 
 
 def _clean_inline(text: str) -> str:
@@ -102,7 +106,7 @@ def _purpose(text: str, topic: str) -> str:
             break
     joined = _normalize_text(" ".join(para))
     if len(joined) > 120:
-        joined = joined[:120].rstrip("，、：:；;/ .")
+        joined = joined[:118].rstrip("，、：:；;/ ") + "…"
     return joined or topic
 
 
