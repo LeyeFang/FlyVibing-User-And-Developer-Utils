@@ -32,7 +32,7 @@ Engine Editor Live MCP — 运行中编辑器的热注入工具（v0.4.0: 双档
     MCP lite / full: python -m engine_editor_mcp --profile lite|full
     Skill（渐进披露）: engine-editor-cli setup --workspace <项目目录>
 
-dev 仓库内等价入口: python -m engine_editor_mcp.mcp_server  （薄 shim, 同一源码）
+dev 仓库内等价入口: python Utils\\ExtDev\\EditorMcp\\mcp_server.py （薄 shim, 同一源码）
 """
 
 import io

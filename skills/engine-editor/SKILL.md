@@ -13,6 +13,20 @@ description: "控制正在运行的 MyGameEngine 编辑器：创建/修改场景
 2. 若返回 `编辑器未运行（127.0.0.1:8977 无监听）` → **不要重试循环**，直接告诉用户先启动编辑器。
 3. 端口自定义时两侧都设 `MGE_EDITOR_MCP_PORT`（默认 8977）。
 
+## 0.5 ★ 可运行性红线（先记住这条）
+
+**PIE / 导出成品只渲染“节点图生成”的内容** — 编辑器里的实体是**模板**，不会直接出现在 Play 里。
+场景要在 `sim.play` 后“有东西”（能看到实体 / 跑实验逻辑），**必须有节点图**；
+最低配 = 一个 `EntitySpawn` 节点生成模板实体：
+
+```
+OnGameStart ──exec──> EntitySpawn(template=<实体名>)
+```
+
+没有生成器的场景 Play 后是**空画面**——这是引擎的模板语义，不是 bug。
+`sim.play` 遇到此类场景（有 MeshRenderer 实体但无 EntitySpawn）会返回 `warning` 字段并在编辑器控制台提醒；
+看到 warning / 空画面时先补图（配方见 `references/workflows.md` §1/§2）。
+
 ## 1. 通道选择（token 成本排序）
 
 | 通道 | 未使用时的常驻成本 | 何时用 |

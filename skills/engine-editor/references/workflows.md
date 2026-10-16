@@ -30,7 +30,23 @@ engine-editor-cli capture editor --out cue_hidden.png
 
 相对调整（等同拖拽 gizmo）：`entity.transform id=5 position='[1,0,0]' relative=true`。
 
-## 2. 从零批建节点图（batch JSON）
+### ★ 让场景“可运行”（必须 — 否则 Play 后空画面）
+
+编辑器实体只是**模板**；PIE 只显示节点图生成的内容。最低配 = `EntitySpawn` 生成实体：
+
+```powershell
+engine-editor-cli call graph.list                                  # 拿 OnGameStart 节点的 id
+engine-editor-cli call graph.add type=EntitySpawn props='{"template":"Cross"}'
+engine-editor-cli call graph.link from='{"node":<OnGameStart id>,"pin":"exec"}' to='{"node":<新节点 id>,"pin":"exec_in"}'
+engine-editor-cli call sim.play                                    # 等 sim.state = Running
+engine-editor-cli capture pie --out run.png                        # 看图确认不是空画面
+engine-editor-cli call sim.stop
+```
+
+> 没有 EntitySpawn 的场景：`sim.play` 返回 `warning`（引擎兑底），Play 画面为空属预期语义。
+> 复杂时序（trial / cue 显隐 / 触发脉冲）→ 用 node-graph skill 的 build_graph spec 通道生成。
+
+## 2. 从零批建节点图（batch JSON — 让场景可运行的必要路径）
 
 `ops.json`：
 

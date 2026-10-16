@@ -1,12 +1,17 @@
 ---
 name: node-graph
-description: "构建/修改 .scene 里的实验节点图（离线通道 — 不需要引擎运行）: 按节读规则、实验 spec→节点图（build_graph）、注入 .scene（apply）。Use when the user asks to generate or edit experiment node graphs from a spec, wire trials/cues/triggers, or apply a graph JSON into a scene file. 校验/实时编辑请用 engine-editor skill（引擎内服务）。通道: python -m flyvibing_node_editor.cli（终端首选）或 node-graph-editor MCP（get_rules/get_scene_entities/build_graph/apply_graph）。"
+description: "构建/修改 .scene 里的实验节点图（离线通道 — 不需要引擎运行）: 按节读规则、实验 spec→节点图（build_graph）、注入 .scene（apply）。★ 节点图是场景可运行的必要条件：编辑器实体只是模板，不建图则 PIE/成品内什么都不渲染。Use when the user asks to generate or edit experiment node graphs from a spec, wire trials/cues/triggers, or apply a graph JSON into a scene file. 校验/实时编辑请用 engine-editor skill（引擎内服务）。通道: python -m flyvibing_node_editor.cli（终端首选）或 node-graph-editor MCP（get_rules/get_scene_entities/build_graph/apply_graph）。"
 ---
 
 # Node Graph 离线构建（MyGameEngine）
 
 从**实验描述 spec** 生成节点图并写入 `.scene`；或按节查阅节点参考。与引擎运行状态无关。
 （引擎运行时的实时编辑/校验/截图 → 用 `engine-editor` skill。）
+
+> ★ **节点图是场景可运行的必要条件**（不是可选装饰）：编辑器里的实体只是模板，
+> PIE / 导出成品只渲染与执行节点图生成的内容 —— 不建图 = 运行时（几乎）什么都看不到。
+> 最低配: `OnGameStart → EntitySpawn(template=<实体名>)`。
+> 完成建图后必须过引擎校验（见 §2 末尾），有实体但无图的情况 `sim.play` 会返回 warning 提醒。
 
 ## 0. 通道选择
 

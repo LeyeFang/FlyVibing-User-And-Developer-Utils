@@ -95,12 +95,12 @@ def install(profile: str = "lite") -> int:
     config["servers"][SERVER_NAME] = {
         "type": "stdio",
         "command": _python_command(),
-        "args": ["-m", "engine_editor_mcp.mcp_server", "--profile", profile],
+        "args": ["-m", "engine_editor_mcp", "--profile", profile],
         "cwd": PROJECT_DIR,
     }
     _write_config(config_path, config)
     print(f"  ✓ 注册 '{SERVER_NAME}'（profile={profile}） → {config_path}")
-    print(f"    command: {_python_command()} -m engine_editor_mcp.mcp_server --profile {profile}")
+    print(f"    command: {_python_command()} -m engine_editor_mcp --profile {profile}")
 
     server_src = os.path.join(PROJECT_DIR, "Utils", "ExtDev", "EditorMcp", "mcp_server.py")
     print(f"  ✓ mcp_server.py: {'found' if os.path.isfile(server_src) else 'MISSING!'}")
