@@ -57,7 +57,9 @@ engine-editor-cli probe editor --points 160:120;800:450   # 像素采样（顶�
 engine-editor-cli call renderer.snapshot     # 渲染器状态（后端/GL/资源计数/帧统计）
 engine-editor-cli call project.save          # 保存工程（当前路径; 带 path=Save As）
 engine-editor-cli call project.export target_parent=D:/out include_player=true   # 导出成品（含 runtime; 分钟级）
-engine-editor-cli doc show dev/project_export_protocol   # 内置文档已 CLI 化（doc list / doc search / show topic#节号|标题片段）
+engine-editor-cli doc                    # 内置文档总索引（主题 + 二级标题；先索引后内容，别整篇读 md stub）
+engine-editor-cli doc outline <topic>    # 章节索引（标题 + 一行预览）→ doc show <topic>#节号 取正文
+engine-editor-cli doc search <关键词>     # 跨主题检索
 ```
 
 - 值解析：先按 JSON（数字/true/false/数组/对象/带引号字符串），失败按纯字符串；`parent=none` 即字符串。
