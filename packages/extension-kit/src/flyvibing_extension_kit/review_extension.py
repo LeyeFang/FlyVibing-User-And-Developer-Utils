@@ -2,7 +2,7 @@
 
 用法:
     python packages/extension-kit/review_extension.py <extension_dir> [<dir>...]
-    python packages/extension-kit/review_extension.py --all    # 扫仓库内全部 Functions/*/
+    python packages/extension-kit/review_extension.py --all    # 扫仓库内全部 Application/Functions/*/
 
 检查项（对照 Doc/ExtDev/extension_dev_protocol.md）:
 
@@ -426,9 +426,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args == ["--all"]:
         root = os.path.abspath(os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "Functions"))
+            os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "Application", "Functions"))
         if not os.path.isdir(root):
-            print(f"Functions 目录不存在: {root}")
+            print(f"Application/Functions 目录不存在: {root}")
             return 2
         dirs = []
         for dirpath, _dirnames, filenames in os.walk(root):

@@ -7,7 +7,7 @@
 
 ```powershell
 # 审查单个/多个扩展目录
-python packages/extension-kit/review_extension.py Functions/SerialParallelDevice
+python packages/extension-kit/review_extension.py Application/Functions/SerialParallelDevice
 # 审查仓库内全部扩展
 python packages/extension-kit/review_extension.py --all
 ```

@@ -24,18 +24,18 @@
 
 | 扩展 | 目录（本仓库） | 状态 | 示范内容 |
 |---|---|---|---|
-| SignalProcess | `Functions/SignalProcess/` | skeleton（可装载） | 最小 extension.py + `ext.sigproc.info` op 注册 |
-| SerialParallelDevice | `Functions/SerialParallelDevice/` | v0.2.0 | **官方完整示例**：独立监视面板 + 逻辑设备名（`@alias` 跨机器）+ `ext.device.*` ops 八件套 + 面板↔场景同步 |
-| VirtualDevice | `Functions/VirtualDevice/` | v0.1.0 | **设备族面板模板（官方示例）**：watch/record 分离 + 实时示波器 + 显示滤波（因果 IIR）+ `ext.virtual.*` 九件套 + 设置持久化; 厂商复制指南见其 README |
-| BCIAlgorithm | `Functions/BCIAlgorithm/` | partial | FBCSP/CCA 算法资产迁移规划 |
+| SignalProcess | `Application/Functions/SignalProcess/` | skeleton（可装载） | 最小 extension.py + `ext.sigproc.info` op 注册 |
+| SerialParallelDevice | `Application/Functions/SerialParallelDevice/` | v0.2.0 | **官方完整示例**：独立监视面板 + 逻辑设备名（`@alias` 跨机器）+ `ext.device.*` ops 八件套 + 面板↔场景同步 |
+| VirtualDevice | `Application/Functions/VirtualDevice/` | v0.1.0 | **设备族面板模板（官方示例）**：watch/record 分离 + 实时示波器 + 显示滤波（因果 IIR）+ `ext.virtual.*` 九件套 + 设置持久化; 厂商复制指南见其 README |
+| BCIAlgorithm | `Application/Functions/BCIAlgorithm/` | partial | FBCSP/CCA 算法资产迁移规划 |
 
 > 每个扩展目录内含 `TODO.md`（状态档案 + 落地清单），是本展示范。
-> **接手维护 SerialParallelDevice 的 agent**: 先读 `Functions/SerialParallelDevice/HANDOFF.md`（交接书，含已定裁决/坑/下一步/验收）
+> **接手维护 SerialParallelDevice 的 agent**: 先读 `Application/Functions/SerialParallelDevice/HANDOFF.md`（交接书，含已定裁决/坑/下一步/验收）
 > 与 `HANDOFF_PROMPT.md`（可直接粘给新会话的启动提示词）。
 
 ## 3. 获取方式与生态（过渡期 → 目标）
 
-- **当前（过渡期）**：扩展开发在引擎仓库内进行（`Functions/**`）；agent 工具链经
+- **当前（过渡期）**：扩展开发在引擎仓库内进行（`Application/Functions/**`）；agent 工具链经
   `FlyVibing-User-And-Developer-Utils/packages/editor-mcp` 的 wheel 安装（`engine-editor-cli setup` 可向任意工作区装配 skill + mcp.json）。
 - **目标（规划）**：SDK 包（类型存根 + 脚手架模板 + 文档）+ 一条安装命令的开发者体验；
   剥离路径与触发条件见 `../Dev/ecosystem_plan.md`。

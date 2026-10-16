@@ -1,6 +1,6 @@
 # media_protocol.md — 动态媒体协议（M1 v2: 节点驱动 GIF/图像）
 
-> 改 `Application/Functions/Media/**`（MediaSystem）、`MediaPlayer` 组件、
+> 改 `Application/Core/Media/**`（MediaSystem）、`MediaPlayer` 组件、
 > `ShowMedia` 节点、`TextureUpdateCommand` 链前必读。
 > **v2 决议（2026-10-06，用户）**：编辑器编辑只是模板；PIE 唯一由 GameRuntime 控制；
 > 只有节点编辑器合理建图才生效。蓝图与依赖选型见 `roadmap_next.md` 章 M。
@@ -61,7 +61,7 @@ MediaSystem.advance(engine=GameRuntime, eid, dt)
 | 文档/构图 | `rules.md` + `graph_rules.py`（场景内嵌）+ `GraphBuilder.show_media` |
 | 冒烟覆盖 | 场景 `node_editor_smoke` widgets_all_modules 代表节点 |
 
-## 4. MediaSystem API（`Application/Functions/Media/MediaSystem.py`）
+## 4. MediaSystem API（`Application/Core/Media/MediaSystem.py`）
 
 | API | 语义 |
 |---|---|
@@ -111,7 +111,7 @@ MediaSystem.advance(engine=GameRuntime, eid, dt)
 
 | 文件 | 角色 |
 |---|---|
-| `Application/Functions/Media/MediaSystem.py` (+`__init__.py`) | 解码缓存 / 播放时钟 / 纹理协调（被动库） |
+| `Application/Core/Media/MediaSystem.py` (+`__init__.py`) | 解码缓存 / 播放时钟 / 纹理协调（被动库） |
 | `Application/Core/NodeGraph/node_types/media.py` | ShowMedia 类型/引脚 |
 | `Application/Core/NodeGraph/evaluators/media.py` | 求值器（干跑惰性; ctx.scene.app → advance） |
 | `Application/Core/NodeGraph/validation/checks.py` | §12 媒体静态检查 |

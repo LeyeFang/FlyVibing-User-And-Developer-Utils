@@ -3,7 +3,7 @@
 > 读者: **外部/无上下文的开发者与 agent**（模拟社区生态 — 只有本文件 + 仓库即可开工）。
 > 架构背景: `extension_protocol.md`（三层高度模型 / 三档侵入 / 兼容机制）。
 > 状态: **M0 已实装 + M1 部分实装**（`ctx.ui.register_window` 2026-10-11；
-> 官方示例 = `Functions/SerialParallelDevice`（设备 IO + 事件流面板）与 `Functions/VirtualDevice`（虚拟设备 + 波形监视面板））；
+> 官方示例 = `Application/Functions/SerialParallelDevice`（设备 IO + 事件流面板）与 `Application/Functions/VirtualDevice`（虚拟设备 + 波形监视面板））；
 > M1+ 剩余能力在本文件中以 `[M1 待]` 标注（当前为设计约束, 实装后按其验收）。
 
 ---
@@ -17,15 +17,15 @@
 
 | id | 目录 | 状态 |
 |---|---|---|
-| `sigproc` | `Functions/SignalProcess/` | skeleton（可装载样例） |
-| `bci` | `Functions/BCIAlgorithm/` | partial（内核算已实现, 待迁移） |
-| `device` | `Functions/SerialParallelDevice/` | v0.2.0（设备 IO + 事件流监视面板, 见 §7） |
-| `virtual` | `Functions/VirtualDevice/` | v0.1.0（**波形监视面板范例**: watch/record + 显示滤波 + `ext.virtual.*` 九件套, 见 §7） |
+| `sigproc` | `Application/Functions/SignalProcess/` | skeleton（可装载样例） |
+| `bci` | `Application/Functions/BCIAlgorithm/` | partial（内核算已实现, 待迁移） |
+| `device` | `Application/Functions/SerialParallelDevice/` | v0.2.0（设备 IO + 事件流监视面板, 见 §7） |
+| `virtual` | `Application/Functions/VirtualDevice/` | v0.1.0（**波形监视面板范例**: watch/record + 显示滤波 + `ext.virtual.*` 九件套, 见 §7） |
 
 ## 2. 快速上手（最小扩展）
 
 ```
-Functions/MyThing/            # 内置扩展（随仓库分发）
+Application/Functions/MyThing/  # 内置扩展（随仓库分发）
   extension.json              # ① 清单
   extension.py                # ② 入口（headless 安全 — 禁止顶层创建 imgui context/窗口/GL;
                               #    纯模块导入 imgui 允许, 见 §12.3）
@@ -271,16 +271,16 @@ SettingsPanel.register_page(SettingsPage(
 `python FlyVibing-User-And-Developer-Utils/packages/extension-kit/review_extension.py <扩展目录>` —
 C1/C2 检查基类与实现、C3 检查 close_policy 声明（检查项全表见工具头部）。
 
-**官方示例**: `Functions/SerialParallelDevice/extension.py`（监视面板 — 上述全部契约的活参考:
+**官方示例**: `Application/Functions/SerialParallelDevice/extension.py`（监视面板 — 上述全部契约的活参考:
 枚举/文本混合端口选择、设置持久化、快照式事件流、`ext.device.*` **八件套** ops、
 `close_policy="disable"` + `on_ui_event` 收尾示范; **面板 ↔ 场景 同步示范**（2026-10-12）:
 `bind_alias` / `bind_nodes` 两个 op + 面板 “Device names (@alias)” 段 — 面板按钮与 agent
 调用**同一个**操作实现（动作单点）, 经 `ctx.graph` 读/写当前图节点 props, 见
 `Doc/Dev/device_io_protocol.md` §12）。
-> **接手维护该扩展的 agent 入口**: `Functions/SerialParallelDevice/HANDOFF.md`（交接书: 边界/裁决/坑/下一步/验收）
+> **接手维护该扩展的 agent 入口**: `Application/Functions/SerialParallelDevice/HANDOFF.md`（交接书: 边界/裁决/坑/下一步/验收）
 > + `HANDOFF_PROMPT.md`（可直接粘给新会话的启动提示词）。
 
-**第二个官方示例（设备族面板模板）**: `Functions/VirtualDevice/`（虚拟信号发生器波形监视面板 —
+**第二个官方示例（设备族面板模板）**: `Application/Functions/VirtualDevice/`（虚拟信号发生器波形监视面板 —
 watch / record 分离、实时示波器（min/max 包络 + 悬停读数）、显示滤波（陷波/频带, 2/4 阶因果 IIR）、
 采集落盘、`ext.virtual.*` **九件套** ops、设置持久化与 `close_policy="disable"` 收尾;
 **厂商复制指南**见其 README — 设备族面板扩展的起手模板）。

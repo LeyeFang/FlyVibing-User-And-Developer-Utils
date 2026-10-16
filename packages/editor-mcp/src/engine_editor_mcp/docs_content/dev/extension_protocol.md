@@ -12,7 +12,7 @@
 | 层 | 名称 | 代码域 | 使用者 | 生命周期 | 对外可见? |
 |---|---|---|---|---|---|
 | L0 | **EngineModule**（宿主装配模块, 现名 Plugin — 见 §2） | `Application/Core/` + 各宿主（EditorHost/GameRuntime/测试宿主） | Engine 子类 | 引擎启动/关闭 | 否 — 引擎内部概念 |
-| L1 | **Extension**（扩展） | `Functions/**`（内置）+ 用户扩展目录（外部, 规划） | 编辑器应用（ExtensionManager, 规划） | 编辑器运行时可启停 | **是 — 对外开发者唯一说法** |
+| L1 | **Extension**（扩展） | `Application/Functions/**`（内置）+ 用户扩展目录（外部, 规划） | 编辑器应用（ExtensionManager, 规划） | 编辑器运行时可启停 | **是 — 对外开发者唯一说法** |
 | L2 | **Mod**（运行时内容） | 未定义（parked） | 播放器/导出游戏 | 游戏启动 | 未来（v1 明确不做） |
 
 ```mermaid
@@ -23,7 +23,7 @@ graph TB
       EM --> CORE
     end
     subgraph L1[L1 编辑器应用层]
-      EXT[Extension 扩展<br/>Functions/** 内置 + 用户目录 外部]
+      EXT[Extension 扩展<br/>Application/Functions/** 内置 + 用户目录 外部]
       SDK[ExtSDK 门面 API]
       HOST[ExtensionManager / ExtensionHost 规划]
       EXT --> SDK
@@ -161,7 +161,7 @@ graph TB
 
 | 守卫 | 形态 | 内容 |
 |---|---|---|
-| `test_extension_boundary.py`（M0 立项） | 静态扫描 | ① 外部扩展 import 白名单（仅 ExtSDK + stdlib）；② Core/Editor 不 import `Functions/**`；③ monkey-patch 模式黑名单检测（对核心类的运行时 `setattr`） |
+| `test_extension_boundary.py`（M0 立项） | 静态扫描 | ① 外部扩展 import 白名单（仅 ExtSDK + stdlib）；② Core/Editor 不 import `Application/Functions/**`；③ monkey-patch 模式黑名单检测（对核心类的运行时 `setattr`） |
 | 契约守卫（复用） | 已有 | 扩展命令进 §10 → `test_action_contract` 三方一致自动覆盖 |
 | 线程守卫（复用） | 已有 | `test_thread_boundary` SPAWN_SITES 增加扩展宿主路径；ThreadRegistry `ext:<id>:*` 命名强制 |
 | 冒烟（M3） | 新增 | 最小示例扩展 headless 加载/启停/卸载零残留 |
@@ -186,13 +186,13 @@ graph TB
 2. **GameRuntime 装配对称化**: 保持硬装配 + 文档承认两种合法装配（默认按推荐执行, 可回调）。
 3. **M0**: 已执行（改名 + ExtensionManager 骨架 + 菜单 + ops 通道 + 默认扩展建档）。
 4. 上轮蓝图遗留 6 问: 默认按推荐执行 — UI 直通+封装双层 / 外部目录 M3 / 扩展命令进契约（ext.* 独立于核心表）/
-   设备类默认进程隔离 / 保留 `Functions/` 目录名 / v1 范围仅编辑器扩展（Mod 不做）。
+   设备类默认进程隔离 / 保留 `Functions/` 目录名（现为 `Application/Functions/`，2026-10-16 内迁） / v1 范围仅编辑器扩展（Mod 不做）。
 
 ---
 
 ## 9. 扩展边界执行细则（2026-10-16 — 事故复盘后定稿）
 
-背景: 一次社区交付的设备插件被置于内置扩展扫描根（`Functions/EEGDevice/Gtec/`）并被当作
+背景: 一次社区交付的设备插件被置于内置扩展扫描根（当时为仓库根 `Functions/EEGDevice/Gtec/`；2026-10-16 内迁后为 `Application/Functions/Gtec/` 本地夹具）并被当作
 “官方示例”引用 — 菜单/测试/文档/校验随之产生**隐性三方引用**，核心树被迫随插件演化
 （2026-10-16 已整体剥离）。以下细则用于根治该类依赖方向破坏。
 
@@ -203,7 +203,7 @@ graph TB
 - 机制需要展示提示文案时，仅描述**能力**（如“在设备面板绑定”），不得点名具体 op（点名即耦合）。
 
 **R2 — 内置扩展 = 主团队自研（红线）**
-- 仓库根 `Functions/**`（内置扫描根）只允许主团队自研的官方示例/自研扩展入库。
+- `Application/Functions/**`（内置扫描根；2026-10-16 由仓库根 `Functions/` 内迁）只允许主团队自研的官方示例/自研扩展入库。
   第三方/社区交付件**一律不入库**（无论是否“送给官方”），只经用户目录加载与分发。
 - 官方示例与自研扩展由主团队拥有许可、代码与验收；社区件若需官方形态，由主团队重写吸收。
 

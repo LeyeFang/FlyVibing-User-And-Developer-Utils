@@ -39,7 +39,7 @@ flyvibing-node-editor build --spec spec.json --out graph.json
 flyvibing-node-editor apply --scene scenes/main.scene --graph graph.json
 
 # ③ 交扩展前自检（0 fail 才算过）
-flyvibing-review Functions/MyExtension
+flyvibing-review Application/Functions/MyExtension
 ```
 
 ## 边界：同一件事只做一遍

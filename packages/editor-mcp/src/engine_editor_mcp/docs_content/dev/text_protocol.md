@@ -1,6 +1,6 @@
 # text_protocol.md — 文字显示系统协议
 
-> 改 `Application/Functions/Text/**`、`TextDisplay` 组件、`SetText` 节点、
+> 改 `Application/Core/Text/**`、`TextDisplay` 组件、`SetText` 节点、
 > 文字光栅化/动态纹理绑定路径前必读。
 > 本协议由「文字系统」章建立（2026-10-07）；复用媒体链（动态纹理）+ P1 混合交付。
 > 一句话：**文字 = 自动生成的动态纹理 + 普通方块实体**——用户从不接触独立纹理。
@@ -12,7 +12,7 @@
 | 层 | 位置 | 职责 |
 |---|---|---|
 | 组件（状态载体） | `Application/Core/Scene/BasicComponents.py: TextDisplay` | 文本 + 全部样式字段 |
-| 系统（光栅化） | `Application/Functions/Text/TextSystem.py` | Pillow 光栅化 → 动态纹理 → 材质槽绑定 + auto_scale |
+| 系统（光栅化） | `Application/Core/Text/TextSystem.py` | Pillow 光栅化 → 动态纹理 → 材质槽绑定 + auto_scale |
 | 节点（控制面） | `node_types/text.py` + `evaluators/text.py` + `widgets/text.py`（SetText） | PIE 中改字并立即刷新 |
 | 编辑器预热览 | `EditorLayer.OnUpdate` → `TextSystem.tick(EditorHost)` | 编辑即预览（脏扫描，仅本引擎实体） |
 | 检查器 | `ScenePanel` 通用组件区（"其它组件"）+ `SceneBrowserController.get/set_component_field` | 全字段直接编辑（含 ColorEdit4） |

@@ -62,7 +62,7 @@
     相反规则：`begin_combo` / `begin_tab_item` **仅返回 True 时** end（无条件 end 会
     "EndPopup too many times"）；`begin_table` 按其返回值配对。
     **静态拦截**（2026-10-12）：`Test/Application/Editor/test_imgui_stack_pairing.py`
-    （core — 反模式自检 + 主应用与 `Functions/**` 同源扫描 + 早退补偿的配对计数），
+    （core — 反模式自检 + 主应用与 `Application/Functions/**` 同源扫描 + 早退补偿的配对计数），
     扩展侧同一规则由审查器 C8/C9/C10 执行；运行期回归以扩展自测（headless imgui 裸绘制帧）为准。
     崩溃定位指引与上游 issue 材料：`Doc/Dev/upstream_imgui_beginchild_fullclip.md`。
 14. **imgui 布局持久化永久禁用**（2026-10-12 实测裁决）：引擎侧 `EditorImguiLayer.OnAttach`
