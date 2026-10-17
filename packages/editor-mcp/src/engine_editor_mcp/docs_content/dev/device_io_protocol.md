@@ -47,6 +47,10 @@
   - 两种格式都附同名 `.json` 元数据（设备信息、滤波器索引、起止时间、模式 stub/device、文件清单）。
   - 文件名：`<安全化设备名>_<YYYYmmdd_HHMMSS>.<ext>`；目录来自 Init 节点 `save_dir`
     （默认 `.` = 当前目录）。
+- **附加通道（触发合成列, 2026-10-16）**：硬件块可带 +1 列（16 线触发合并）——显示/节点只消费
+  EEG 主通道，录制保留原列（`channel_names` 末列 `TRIG`）；事件通路 = `get_trigger_events`
+  （沿变检出 `[{sample, t_s, code}]`，增量游标）+ 落盘元数据 `trigger_events`；无硬件回归用
+  合成触发源 `SigGenConfig.trigger_every_s`。
 - Stop 语义：`save_scope=session` 保存 Start 以来全部数据（内存拼接，受
   `MAX_RECORD_BYTES = 2 GiB` 保护，超限仅窗口继续更新）；`save_scope=buffer` 只保存当前窗口。
 - `close_all()`：Runtime 停止安全网（**不保存**，丢弃数据）；由 `GameRuntime.start/stop` 调用。
@@ -117,15 +121,17 @@
 - **保存仍在引擎侧**：服务只提供数据；npz/csv/元数据落盘逻辑与进程内完全一致。
 - **生命周期**：VirtualDevice 引擎自动拉起（`sys.executable`，引擎环境，动态端口，日志在系统 temp）；
   外部品牌服务**三级路由（2026-10-15 模式）**: 显式端点（`MGE_EEG_SERVICE=host:port`）连接 →
-  设备配置 `service_python`（自有环境 python）**自动拉起**（动态端口，断开回收子进程）→
+  设备配置 `service_python` + `service_module`（自有环境 python + 品牌服务模块；或 env
+  `MGE_EEG_SERVICE_PYTHON` / `MGE_EEG_SERVICE_MODULE`）**自动拉起**（动态端口，断开回收子进程）→
   否则直连默认端口（**3s 快速失败** + 启动指引）；
   客户端断开 → 服务退出（引擎崩溃自动清理）；`kill/close` 发 shutdown 并回收子进程。
 - **连通失败诊断**：报错含启动提示 + 服务日志尾部（自动拉起场景）；
   两阶段失败点显式区分（2026-10-15 实战教训）——`cannot connect ...` = 服务没起（A: 自动拉起 / B: 手动启动），
   `init failed ...` = 服务已起但设备被占用（如厂商软件独占），两者文案各不相同。
 - **服务探针（模式）**：品牌服务应提供秒级只读连通探测（无副作用），供面板/agent 排障（新品牌落地时随服务实现）。
-- 待办：PIE start/stop 的 `close_all` 与会话联动政策、品牌目录随环境打包（规划见 §6）、
-  服务协议无头回环测试随新品牌服务落地重建（原测试已随品牌调整归档）。
+- 待办：PIE start/stop 的 `close_all` 与会话联动政策、品牌目录随环境打包（规划见 §6）。
+  （服务协议无头回环已重建 — 2026-10-16: stub 品牌服务 `Test/Application/Functions/_brand_stub_service.py`
+  + `test_siggen_device.py` §6 — 自动拉起 / hello / 数据往返；真实品牌随新服务落地再验。）
 
 ---
 

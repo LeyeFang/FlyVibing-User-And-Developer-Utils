@@ -9,8 +9,8 @@ description = "Offline node-graph tool: experiment spec -> graph JSON -> .scene 
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-# 图校验实现**唯一**（引擎 Application.Core.NodeGraph.validation）；本工具是无头调用方。
-# 因此独立安装后校验功能需要引擎源码在 PYTHONPATH 上（见 README「依赖与边界」）。
+# 校验规则唯一实现在本包 `node_graph_validator.check_graph`（引擎 validation/checks.py 是薄适配器）。
+# 校验需引擎源码的节点类型注册表 / 图约束 / 求值器在 PYTHONPATH 上（见 README「依赖与边界」）。
 dependencies = []
 
 [project.scripts]

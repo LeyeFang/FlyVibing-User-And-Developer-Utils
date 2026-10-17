@@ -1,247 +1,461 @@
 """
-Node Graph Validator — 无需完整引擎运行即可验证场景 JSON 中节点图的正确性。
+Node Graph Validator — 节点图校验的**单一实现**（离线 CLI 与在线编辑器共用）。
 
-两层验证:
-  L1 (静态):  JSON 结构检查 — pin_ids 完整性、连线合法性、重复检测
-  L2 (干跑):  模拟 N 帧执行 — 打印执行流追踪，跳过所有副作用
+层级:
+  L1 静态: check_graph(scene_data) -> [{"level", "code", "message", "node_id"}]
+           validate_static(scene_data) -> [message, ...]        （兼容旧调用, 仅 error）
+  L2 干跑: dry_run_simulation(...) → 委托引擎
+           Application.Core.NodeGraph.validation.dry_run.run_dry_run（单一实现）
 
-用法:
-  python -m Test.Validators.node_graph_validator <scene_path> [--frames N] [--verbose]
+消费方（同源）:
+  离线: python -m flyvibing_node_editor.node_graph_validator <scene> [--frames N]
+        flyvibing_node_editor.cli / GraphBuilder.validate / apply_graph --validate
+  在线: Application/Core/NodeGraph/validation/checks.static_check_graph（薄适配器）
+        ← graph.validate.*（LiveCommandServer）/ Node Editor Validate 按钮 / PlayerEntry --dry-run
 
-示例:
-  # 仅静态检查
-  python -m Test.Validators.node_graph_validator Test/TestProject/MI.scene
+规则随节点类型与图约束演进 —— **修改规则只改本文件**，引擎侧不再保留副本。
+依赖 Application.Core.NodeGraph（节点类型注册表 / 图约束 / 干跑求值器），
+因此需在引擎仓库环境中运行（或引擎源码在 PYTHONPATH 上）。
 
-  # 静态检查 + 干跑 120 帧 (MI 实验: 60 trials × 2s)
-  python -m Test.Validators.node_graph_validator Test/TestProject/MI.scene --frames 120
-
-  # 详细模式 — 逐帧打印每个节点的 pin 值
-  python -m Test.Validators.node_graph_validator Test/TestProject/MI.scene --frames 10 --verbose
+L1 规则:
+  1. 未知节点类型 / 缺失引脚（optional 版本兼容 pin 除外）/ Pin ID 冲突
+  2. 连线端点存在性 / 方向（output→input）/ 重复连线
+  3. 孤立节点（warning — 可能是刻意保留的模板/常量节点）
+  4. 必连引脚（Branch.Condition）
+  5. SigGen Init/Kill 强制配对（graph_constraints 同一规则）
+  6. 设备池: Create/Kill 配对 + Add/设备引用池校验
+  7. 设备池: AddToDevicePool.device pin 连线检查（未连 / 来源 / 单池成员制）
+  8. Epoch 数据集: Count/Clear/Save 引用校验
+  9. Epoch 数据集: EpochAppend 必需数据引脚（Data / Label）
+  10. BCI 算法: Init/Train/Test 模型与数据集引用校验 + TestCCA 频率组 ≥2
+  11. 媒体: ShowMedia — Entity 引脚必需连线 + exec_in 警示
+  12. 设备别名: props 中 @name 引用必须在本机已绑定（跨机器迁移提示）
 """
 
 from __future__ import annotations
 
 import json
-import sys
 import os
+import re
+import sys
 
-# ── 确保项目根在 sys.path ──
-_project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if _project_root not in sys.path:
-    sys.path.insert(0, _project_root)
+_EVENT_TYPES = {"OnGameStart", "OnFrameUpdate", "OnGameStop"}
+
+# 必连输入引脚: {node_type: [pin_name, ...]}
+_REQUIRED_CONNECTIONS = {
+    "Branch": ["Condition"],
+}
+
+_NODE_ID_RE = re.compile(r"^Node (\d+)<")
 
 
-def _extract_graph_data(scene_data: dict) -> dict:
-    """从 scene JSON 中提取 node_graph 部分。
+def _entry(level: str, code: str, message: str, node_id: int | None = None) -> dict:
+    return {"level": level, "code": code, "message": message, "node_id": node_id}
+
+
+def _safe_int(value) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def extract_graph_data(scene_data: dict) -> dict:
+    """从 scene JSON / 裸 graph / 旧格式 graph 中提取节点图数据。
 
     支持三种格式:
-      1. { "scene": { "node_graph": { "nodes": ..., "links": ... } } }  ← 标准 .scene 文件
-      2. { "nodes": ..., "links": ... }                                    ← 裸 graph JSON
-      3. { "graph": { "nodes": ..., "links": ... } }                       ← 旧格式
+      1. { "scene": { "node_graph": {...} } }   ← 标准 .scene 文件
+      2. { "nodes": ..., "links": ... }          ← 裸 graph JSON（NodeCanvas.to_dict）
+      3. { "graph": { "nodes": ..., "links": ... } }  ← 旧格式
     """
-    # 格式 1: scene.node_graph
+    if not isinstance(scene_data, dict):
+        return {}
     scene = scene_data.get("scene", {})
     if isinstance(scene, dict):
         ng = scene.get("node_graph")
         if isinstance(ng, dict) and "nodes" in ng:
             return ng
-
-    # 格式 3: graph
     graph = scene_data.get("graph")
     if isinstance(graph, dict) and "nodes" in graph:
         return graph
-
-    # 格式 2: 裸 graph
     if "nodes" in scene_data:
         return scene_data
-
     return {}
 
 
-def validate_static(scene_data: dict) -> list[str]:
-    """L1: 静态结构校验 — 返回错误列表 (空列表 = 通过)。"""
+# 兼容旧名（历史调用方使用私有名）
+_extract_graph_data = extract_graph_data
+
+
+# ═══════════════════════════════════════════════════════════════
+# L1: 静态检查（结构化）
+# ═══════════════════════════════════════════════════════════════
+
+def check_graph(scene_data: dict) -> list[dict]:
+    """L1: 静态结构校验 — 返回结构化条目列表（level: "error" | "warning"）。"""
+    from flyvibing_node_editor.engine_path import ensure_engine_importable
+
+    ensure_engine_importable()
     from Application.Core.NodeGraph.node_types import _TYPES
 
-    errors: list[str] = []
-    graph = _extract_graph_data(scene_data)
-    nodes: dict[str, dict] = graph.get("nodes", {})
-    links: dict[str, dict] = graph.get("links", {})
+    entries: list[dict] = []
+    graph = extract_graph_data(scene_data)
+    nodes: dict = graph.get("nodes", {}) or {}
+    links: dict = graph.get("links", {}) or {}
 
     if not nodes:
-        errors.append("No nodes found in graph data")
-        return errors
+        entries.append(_entry("error", "empty_graph", "No nodes found in graph data"))
+        return entries
 
-    # ── 收集所有 pin_id → (node_id, pin_name, direction) 映射 ──
-    pin_map: dict[int, tuple[str, str, str]] = {}  # pin_id → (nid_str, pin_name, direction)
+    # ── 收集所有 pin_id → (nid_str, pin_name, direction) 映射 ──
+    pin_map: dict[int, tuple[str, str, str]] = {}
     all_pin_ids: set[int] = set()
 
     for nid_str, nd in nodes.items():
         node_type = nd.get("node_type", "")
         if node_type not in _TYPES:
-            errors.append(f"Node {nid_str}: unknown type '{node_type}'")
+            entries.append(_entry(
+                "error", "unknown_type",
+                f"Node {nid_str}: unknown type '{node_type}'",
+                _safe_int(nid_str),
+            ))
             continue
 
         type_def = _TYPES[node_type]
-        node_pin_ids: dict[str, int] = nd.get("pin_ids", {})
+        node_pin_ids: dict = nd.get("pin_ids", {}) or {}
 
-        # 1. 检查必需 pin 是否存在
+        # 1. 检查模板引脚是否齐全 (optional 标记的版本兼容 pin 缺失不报错)
         for pin_def in type_def.pins:
             if pin_def.name not in node_pin_ids:
-                errors.append(
+                if getattr(pin_def, "optional", False):
+                    continue
+                entries.append(_entry(
+                    "error", "missing_pin",
                     f"Node {nid_str}<{node_type}>: missing pin '{pin_def.name}' "
-                    f"({pin_def.direction}, {pin_def.kind})"
-                )
+                    f"({pin_def.direction}, {pin_def.kind})",
+                    _safe_int(nid_str),
+                ))
 
-        # 2. 收集 pin 映射
+        # 2. 收集 pin 映射 + 冲突检测
         for pin_name, pin_id in node_pin_ids.items():
             pid = int(pin_id)
             if pid in all_pin_ids:
-                # 找到冲突来源
-                for existing_nid, existing_pname, _ in [
-                    (n, p, d) for p_id, (n, p, d) in pin_map.items() if p_id == pid
-                ]:
-                    errors.append(
-                        f"Pin ID collision: {pid} used by "
-                        f"Node {nid_str}.{pin_name} and Node {existing_nid}.{existing_pname}"
-                    )
+                prev = pin_map.get(pid)
+                prev_desc = f"Node {prev[0]}.{prev[1]}" if prev else "(unknown)"
+                entries.append(_entry(
+                    "error", "pin_collision",
+                    f"Pin ID collision: {pid} used by "
+                    f"Node {nid_str}.{pin_name} and {prev_desc}",
+                    _safe_int(nid_str),
+                ))
             all_pin_ids.add(pid)
-            # 查找方向
             direction = "unknown"
+            known = False
             for pin_def in type_def.pins:
                 if pin_def.name == pin_name:
                     direction = pin_def.direction
+                    known = True
                     break
+            if not known:
+                entries.append(_entry(
+                    "warning", "stale_pin",
+                    f"Node {nid_str}<{node_type}>: pin '{pin_name}' is not in the current "
+                    f"type definition (legacy pin; links on it never execute)",
+                    _safe_int(nid_str),
+                ))
             pin_map[pid] = (nid_str, pin_name, direction)
 
     # 3. 连线检查
     link_set: set[tuple[int, int]] = set()
     for lid_str, ld in links.items():
-        from_pin = int(ld["from_pin"])
-        to_pin = int(ld["to_pin"])
+        try:
+            from_pin = int(ld["from_pin"])
+            to_pin = int(ld["to_pin"])
+        except (KeyError, TypeError, ValueError):
+            entries.append(_entry("error", "malformed_link", f"Link {lid_str}: malformed (missing from_pin/to_pin)"))
+            continue
 
         if from_pin not in pin_map:
-            errors.append(f"Link {lid_str}: from_pin={from_pin} not found in any node")
+            entries.append(_entry("error", "link_endpoint", f"Link {lid_str}: from_pin={from_pin} not found in any node"))
         if to_pin not in pin_map:
-            errors.append(f"Link {lid_str}: to_pin={to_pin} not found in any node")
+            entries.append(_entry("error", "link_endpoint", f"Link {lid_str}: to_pin={to_pin} not found in any node"))
 
-        # 方向检查: from 应为 output, to 应为 input
         if from_pin in pin_map and to_pin in pin_map:
             _, _, from_dir = pin_map[from_pin]
             _, _, to_dir = pin_map[to_pin]
             if from_dir == "input":
-                errors.append(
-                    f"Link {lid_str}: from_pin={from_pin} is input (should be output)"
-                )
+                entries.append(_entry("error", "link_direction", f"Link {lid_str}: from_pin={from_pin} is input (should be output)"))
             if to_dir == "output":
-                errors.append(
-                    f"Link {lid_str}: to_pin={to_pin} is output (should be input)"
-                )
+                entries.append(_entry("error", "link_direction", f"Link {lid_str}: to_pin={to_pin} is output (should be input)"))
 
-        # 重复连线
         pair = (from_pin, to_pin)
         if pair in link_set:
-            errors.append(f"Link {lid_str}: duplicate connection {from_pin}→{to_pin}")
+            entries.append(_entry("error", "duplicate_link", f"Link {lid_str}: duplicate connection {from_pin}→{to_pin}"))
         link_set.add(pair)
 
-    # 4. 孤立节点检查 (跳过事件节点)
-    event_types = {"OnGameStart", "OnFrameUpdate", "OnGameStop"}
+    # 4. 孤立节点（warning — 可能是刻意保留）
     connected_pins: set[int] = set()
     for ld in links.values():
-        connected_pins.add(int(ld["from_pin"]))
-        connected_pins.add(int(ld["to_pin"]))
+        try:
+            connected_pins.add(int(ld["from_pin"]))
+            connected_pins.add(int(ld["to_pin"]))
+        except (KeyError, TypeError, ValueError):
+            continue
 
     for nid_str, nd in nodes.items():
         node_type = nd.get("node_type", "")
-        if node_type in event_types:
+        if node_type in _EVENT_TYPES:
             continue
-        node_pin_ids: dict[str, int] = nd.get("pin_ids", {})
+        if node_type not in _TYPES:
+            continue  # 未知类型已报错, 跳过
+        node_pin_ids: dict = nd.get("pin_ids", {}) or {}
         is_isolated = True
         for pin_id in node_pin_ids.values():
             if int(pin_id) in connected_pins:
                 is_isolated = False
                 break
         if is_isolated:
-            errors.append(
+            entries.append(_entry(
+                "warning", "isolated_node",
                 f"Node {nid_str}<{node_type}>: isolated (no connections) — "
-                f"may be dead code or missing links"
-            )
+                f"may be dead code or missing links",
+                _safe_int(nid_str),
+            ))
 
     # 5. 必连引脚检查
-    required_connections = {
-        "Branch": ["Condition"],
-    }
     for nid_str, nd in nodes.items():
         node_type = nd.get("node_type", "")
-        required = required_connections.get(node_type, [])
+        required = _REQUIRED_CONNECTIONS.get(node_type, [])
         if not required:
             continue
-        node_pin_ids: dict[str, int] = nd.get("pin_ids", {})
+        node_pin_ids: dict = nd.get("pin_ids", {}) or {}
         for rpin in required:
             rpid = node_pin_ids.get(rpin)
             if rpid is None:
                 continue
             if int(rpid) not in connected_pins:
-                errors.append(
-                    f"Node {nid_str}<{node_type}>: required pin '{rpin}' is not connected"
-                )
+                entries.append(_entry(
+                    "error", "required_pin_unconnected",
+                    f"Node {nid_str}<{node_type}>: required pin '{rpin}' is not connected",
+                    _safe_int(nid_str),
+                ))
 
-    # 6. 设备 Init/Kill 强制配对 (SigGen; 与编辑器删除级联同一规则)
-    from Application.Core.NodeGraph.graph_constraints import (
-        bci_reference_errors,
-        epoch_reference_errors,
-        pool_pairing_errors,
-        pool_reference_errors,
-        siggen_pairing_errors,
-    )
-    errors.extend(siggen_pairing_errors(nodes))
+    # 6. SigGen Init/Kill 强制配对（设备族同一规则）
+    try:
+        from Application.Core.NodeGraph.graph_constraints import siggen_pairing_errors
 
-    # 7. 设备池: Create/Kill 配对 + 池引用校验
-    errors.extend(pool_pairing_errors(nodes))
-    errors.extend(pool_reference_errors(nodes))
+        for msg in siggen_pairing_errors(nodes):
+            node_id = None
+            m = _NODE_ID_RE.match(msg)
+            if m:
+                node_id = int(m.group(1))
+            entries.append(_entry("error", "siggen_pairing", msg, node_id))
+    except Exception as e:  # noqa: BLE001 — 约束模块失败不应让整个检查崩溃
+        entries.append(_entry("error", "siggen_pairing", f"siggen pairing check failed: {e}"))
 
-    # 8. Epoch 数据集: 引用校验（BCIAlgorithm）
-    errors.extend(epoch_reference_errors(nodes))
+    # 7. 设备池: Create/Kill 配对 + Add/设备引用池校验
+    try:
+        from Application.Core.NodeGraph.graph_constraints import pool_pairing_errors, pool_reference_errors
 
-    # 9. BCI 算法: 模型/数据集引用（BCIAlgorithm）
-    errors.extend(bci_reference_errors(nodes))
+        for msg in pool_pairing_errors(nodes):
+            node_id = None
+            m = _NODE_ID_RE.match(msg)
+            if m:
+                node_id = int(m.group(1))
+            entries.append(_entry("error", "pool_pairing", msg, node_id))
+        for msg in pool_reference_errors(nodes):
+            node_id = None
+            m = _NODE_ID_RE.match(msg)
+            if m:
+                node_id = int(m.group(1))
+            entries.append(_entry("error", "pool_reference", msg, node_id))
+    except Exception as e:  # noqa: BLE001 — 约束模块失败不应让整个检查崩溃
+        entries.append(_entry("error", "pool_pairing", f"pool check failed: {e}"))
 
-    return errors
+    # 8. 设备池: AddToDevicePool.device pin 连线检查 (需 links)
+    try:
+        from Application.Core.NodeGraph.graph_constraints import DEVICE_INIT_PREFIX as _INIT_TYPES
+        from Application.Core.NodeGraph.graph_constraints import POOL_ADD as _POOL_ADD
+
+        to_src: dict[int, int] = {}
+        for ld in links.values():
+            try:
+                to_src[int(ld["to_pin"])] = int(ld["from_pin"])
+            except (KeyError, TypeError, ValueError):
+                continue
+
+        reported_srcs: set[int] = set()
+        for nid_str, nd in nodes.items():
+            if nd.get("node_type") != _POOL_ADD:
+                continue
+            node_pin_ids = nd.get("pin_ids", {}) or {}
+            dp = node_pin_ids.get("device")
+            if dp is None:
+                continue  # optional pin 尚未补齐 — 加载时自动 heal, 静态检查跳过
+            src = to_src.get(int(dp))
+            if src is None:
+                entries.append(_entry(
+                    "error", "device_pin_unconnected",
+                    f"Node {nid_str}<AddToDevicePool>: 'device' pin is not connected "
+                    f"(link Init*Device.device → AddToDevicePool.device)",
+                    _safe_int(nid_str),
+                ))
+                continue
+            src_info = pin_map.get(src)
+            if src_info is None:
+                continue  # 端点问题已由连线检查报告
+            src_nid_str, src_pin_name, src_dir = src_info
+            src_type = (nodes.get(src_nid_str) or {}).get("node_type", "")
+            if src_dir != "output" or src_pin_name != "device" or src_type not in _INIT_TYPES:
+                entries.append(_entry(
+                    "error", "device_pin_source",
+                    f"Node {nid_str}<AddToDevicePool>: 'device' pin must come from an "
+                    f"Init*Device 'device' output (got {src_type}.{src_pin_name})",
+                    _safe_int(nid_str),
+                ))
+                continue
+            # 单池成员制: 同一 device pin 不能被多个 Add 消费
+            add_consumers = 0
+            for ld in links.values():
+                try:
+                    if int(ld["from_pin"]) != src:
+                        continue
+                    cinfo = pin_map.get(int(ld["to_pin"]))
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if cinfo and (nodes.get(cinfo[0]) or {}).get("node_type") == _POOL_ADD:
+                    add_consumers += 1
+            if add_consumers > 1 and src not in reported_srcs:
+                reported_srcs.add(src)
+                entries.append(_entry(
+                    "error", "device_multi_pool",
+                    f"Node {src_nid_str}<{src_type}>: device pin feeds {add_consumers} "
+                    f"AddToDevicePool nodes — a device belongs to ONE pool (exclusive)",
+                    _safe_int(src_nid_str),
+                ))
+    except Exception as e:  # noqa: BLE001
+        entries.append(_entry("error", "device_pin", f"device pin check failed: {e}"))
+
+    # 9. Epoch 数据集: 引用校验 + EpochAppend 必需数据引脚 (Data / Label)
+    try:
+        from Application.Core.NodeGraph.graph_constraints import EPOCH_APPEND as _EPOCH_APPEND
+        from Application.Core.NodeGraph.graph_constraints import epoch_reference_errors
+
+        for msg in epoch_reference_errors(nodes):
+            node_id = None
+            m = _NODE_ID_RE.match(msg)
+            if m:
+                node_id = int(m.group(1))
+            entries.append(_entry("error", "epoch_reference", msg, node_id))
+
+        for nid_str, nd in nodes.items():
+            if nd.get("node_type") != _EPOCH_APPEND:
+                continue
+            node_pin_ids = nd.get("pin_ids", {}) or {}
+            for rpin in ("Data", "Label"):
+                rpid = node_pin_ids.get(rpin)
+                if rpid is not None and int(rpid) not in connected_pins:
+                    entries.append(_entry(
+                        "error", "epoch_pin_unconnected",
+                        f"Node {nid_str}<EpochAppend>: '{rpin}' pin is not "
+                        f"connected (link Get*Data.{rpin} / a label source)",
+                        _safe_int(nid_str),
+                    ))
+    except Exception as e:  # noqa: BLE001
+        entries.append(_entry("error", "epoch_reference",
+                              f"epoch check failed: {e}"))
+
+    # 10. BCI 算法: 模型/数据集引用 + TestCCA 频率组
+    try:
+        from Application.Core.NodeGraph.graph_constraints import bci_reference_errors
+
+        for msg in bci_reference_errors(nodes):
+            node_id = None
+            m = _NODE_ID_RE.match(msg)
+            if m:
+                node_id = int(m.group(1))
+            entries.append(_entry("error", "bci_reference", msg, node_id))
+    except Exception as e:  # noqa: BLE001
+        entries.append(_entry("error", "bci_reference",
+                              f"bci check failed: {e}"))
+
+    # 11. 媒体: ShowMedia — Entity 引脚必需连线; exec_in 未连降为 warning
+    try:
+        from Application.Core.NodeGraph.graph_constraints import SHOW_MEDIA as _SHOW_MEDIA
+
+        for nid_str, nd in nodes.items():
+            if nd.get("node_type") != _SHOW_MEDIA:
+                continue
+            node_pin_ids = nd.get("pin_ids", {}) or {}
+            ep = node_pin_ids.get("Entity")
+            if ep is not None and int(ep) not in connected_pins:
+                entries.append(_entry(
+                    "error", "media_pin_unconnected",
+                    f"Node {nid_str}<ShowMedia>: 'Entity' pin is not connected "
+                    f"(link Get Entity.Entity → ShowMedia.Entity)",
+                    _safe_int(nid_str),
+                ))
+            xp = node_pin_ids.get("exec_in")
+            if xp is not None and int(xp) not in connected_pins:
+                entries.append(_entry(
+                    "warning", "media_exec_unconnected",
+                    f"Node {nid_str}<ShowMedia>: 'exec_in' not connected — "
+                    f"node will never run (wire under OnFrameUpdate)",
+                    _safe_int(nid_str),
+                ))
+    except Exception as e:  # noqa: BLE001
+        entries.append(_entry("error", "media_reference",
+                              f"media check failed: {e}"))
+
+    # 12. 设备别名: props 中以 "@" 开头的引用必须在**本机**已绑定
+    #     （跨机器迁移的第一道提示 —— 换电脑后 PIE 之前就能看见, 协议 device_io_protocol §12）
+    entries.extend(_check_device_aliases(nodes))
+
+    return entries
+
+
+def _check_device_aliases(nodes: dict) -> list[dict]:
+    """扫节点 props 中的 `@device` 引用 → 本机未绑定则 warning（带可操作提示）。"""
+    out: list[dict] = []
+    refs: list[tuple[str, str, object]] = []          # (nid_str, prop_name, value)
+    for nid_str, nd in nodes.items():
+        props = nd.get("props")
+        if not isinstance(props, dict):
+            continue
+        for key, value in props.items():
+            if isinstance(value, str) and value.startswith("@") and len(value) > 1:
+                refs.append((str(nid_str), str(key), value))
+    if not refs:
+        return out
+    try:
+        from Application.Core.DeviceRegistry import describe, get, parse_ref
+    except Exception as e:  # noqa: BLE001 — 无注册表环境不阻塞校验
+        return [_entry("warning", "device_alias_check_unavailable",
+                       f"device alias check skipped: {e}")]
+    for nid_str, key, value in refs:
+        name = parse_ref(value)
+        if get(name) is None:
+            out.append(_entry(
+                "warning", "device_alias_unresolved",
+                f"Node {nid_str}: {key}='{value}' is not bound on this machine "
+                f"({describe(name)}) — bind it in the Serial/Parallel panel or via "
+                f"ext.device.bind_alias name={name} port=COMx",
+                _safe_int(nid_str),
+            ))
+    return out
+
+
+def validate_static(scene_data: dict) -> list[str]:
+    """L1 兼容入口：返回 error 级消息列表（空列表 = 通过）。
+
+    与在线校验同语义：孤立节点等仅作 warning，不阻断。
+    """
+    return [e["message"] for e in check_graph(scene_data) if e["level"] == "error"]
 
 
 # ═══════════════════════════════════════════════════════════════
-# L2: 干跑模拟
+# L2: 干跑模拟（委托引擎单一实现）
 # ═══════════════════════════════════════════════════════════════
-
-class DryRunLogger:
-    """收集干跑日志的结构化记录器。"""
-
-    def __init__(self, verbose: bool = False):
-        self.verbose = verbose
-        self.events: list[dict] = []  # 每条 log 一行
-
-    def __call__(self, node_id: int, node_type: str, action: str, detail: str) -> None:
-        entry = {
-            "node_id": node_id,
-            "node_type": node_type,
-            "action": action,
-            "detail": detail,
-        }
-        self.events.append(entry)
-        if self.verbose:
-            print(f"  [TRACE] #{node_id}<{node_type}> {action} | {detail}")
-
-    def summary(self) -> str:
-        """按 action 类型分组统计。"""
-        from collections import Counter
-        actions = Counter(e["action"] for e in self.events)
-        types = Counter(e["node_type"] for e in self.events)
-        lines = [
-            f"  Total side-effect events: {len(self.events)}",
-            f"  By action: {dict(actions)}",
-            f"  By node_type: {dict(types)}",
-        ]
-        return "\n".join(lines)
-
 
 def dry_run_simulation(
     scene_data: dict,
@@ -250,188 +464,30 @@ def dry_run_simulation(
     real_time: bool = False,
     target_fps: float = 0.0,
 ) -> dict:
-    """L2: 干跑模拟 — 构建 GraphEvaluator，设置 dry_run=True，模拟 N 帧。
+    """L2: 干跑模拟 — 委托引擎 `validation.dry_run.run_dry_run`（单一实现）。
 
-    Args:
-        scene_data:   已加载的 scene JSON dict。
-        max_frames:   最大模拟帧数。
-        verbose:      是否逐节点打印执行追踪。
-        real_time:    True=真实时间模式, False=fake 时间模式 (simulated delta)。
-        target_fps:   真实时间模式下的目标帧率。0=不限制帧率，
-                      仅测量实际 wall-clock 耗时；>0 时用 time.sleep 维持帧率。
+    保留旧返回结构以兼容 GraphBuilder / apply_graph:
+        {frames_simulated, total_events, events_by_type, errors, perf}
 
-    Returns:
-        {
-            "frames_simulated": int,
-            "total_events": int,
-            "events_by_type": dict,
-            "errors": list[str],
-            "perf": dict | None,  # 仅 real_time 模式下返回
-        }
+    `real_time` / `target_fps` 仅为旧签名兼容而保留，已无效果 — 校验一致性
+    要求确定性 fake-time；性能测量请用引擎侧校验报告的 timing 字段。
     """
-    import time as _time_mod
+    from flyvibing_node_editor.engine_path import ensure_engine_importable
 
-    from Application.Core.NodeGraph.node_types import _TYPES
-    from Application.Core.NodeGraph.canvas import NodeCanvas
-    from Application.Core.NodeGraph.evaluator_engine import (
-        GraphEvaluator,
-        ExecutionContext,
-    )
+    ensure_engine_importable()
+    from Application.Core.NodeGraph.validation.dry_run import run_dry_run
 
-    logger = DryRunLogger(verbose=verbose)
-    errors: list[str] = []
-
-    # ── 1. 从 scene JSON 提取 graph 数据并构建 NodeCanvas ──
-    graph_data = _extract_graph_data(scene_data)
-    if "nodes" not in graph_data:
-        errors.append("No 'nodes' found in scene graph data")
-        return {
-                "frames_simulated": 0,
-                "total_events": 0,
-                "events_by_type": {},
-                "errors": errors,
-                "perf": None,
-            }
-
-    try:
-        canvas = NodeCanvas.from_dict(graph_data)
-    except Exception as e:
-        errors.append(f"Failed to deserialize NodeCanvas: {e}")
-        return {
-            "frames_simulated": 0,
-            "total_events": 0,
-            "events_by_type": {},
-            "errors": errors,
-            "perf": None,
-        }
-
-    # ── 2. 构建 GraphEvaluator + ExecutionContext (dry_run) ──
-    evaluator = GraphEvaluator(canvas, _TYPES)
-    ctx = ExecutionContext()
-    ctx.dry_run = True
-    ctx.log = logger
-
-    # 时间参数
-    if real_time:
-        target_frame_s = 1.0 / target_fps if target_fps > 0 else 0.0
-        frame_times: list[float] = []   # 每帧的 wall-clock 耗时 (ms)
-        prev_wall = _time_mod.perf_counter()  # 上一帧结束时刻（用于 delta_time）
-        simulated_dt = 1.0 / 60.0       # 第一帧用默认值，后续用真实时长
-    else:
-        simulated_dt = 1.0 / 60.0
-
-    # ── Header ──
-    mode_label = "Real-Time" if real_time else "Fake-Time"
-    if real_time:
-        fps_label = "(unrestricted)" if target_fps <= 0 else f"@{target_fps:.0f}fps"
-    else:
-        fps_label = "@~60fps"
-    print(f"\n{'='*60}")
-    print(f"  Dry-Run Simulation ({mode_label}) — max {max_frames} frames {fps_label}")
-    print(f"  Nodes: {len(canvas.nodes)}  Links: {len(canvas.links)}")
-    print(f"{'='*60}")
-
-    # ── 3. 触发 OnGameStart ──
-    print("\n── OnGameStart ──")
-    ctx.elapsed_time = 0.0
-    ctx.delta_time = 0.0
-    try:
-        _t0 = _time_mod.perf_counter()
-        evaluator.trigger("OnGameStart", ctx)
-        _startup_ms = (_time_mod.perf_counter() - _t0) * 1000.0
-        if real_time:
-            print(f"  [Perf] OnGameStart: {_startup_ms:.2f} ms")
-    except Exception as e:
-        errors.append(f"OnGameStart error: {e}")
-        if verbose:
-            import traceback
-            traceback.print_exc()
-
-    # ── 4. 逐帧模拟 OnFrameUpdate ──
-    exit_requested = False
-    for frame in range(1, max_frames + 1):
-        ctx.elapsed_time += simulated_dt
-        ctx.delta_time = simulated_dt
-
-        if verbose and frame % 60 == 0:
-            print(f"\n── Frame {frame} (t={ctx.elapsed_time:.1f}s) ──")
-
-        # 真实时间: 记录帧开始时刻，帧结束后记录耗时
-        if real_time:
-            frame_start = _time_mod.perf_counter()
-            # 使用上一帧的真实 wall-clock 时长作为 delta_time
-            now = frame_start
-            ctx.delta_time = max(now - prev_wall, 1e-9)
-            ctx.elapsed_time += ctx.delta_time
-            prev_wall = now
-
-        try:
-            evaluator.trigger("OnFrameUpdate", ctx)
-        except Exception as e:
-            errors.append(f"Frame {frame} error: {e}")
-            if verbose:
-                import traceback
-                traceback.print_exc()
-            break
-
-        # 真实时间: 记录耗时
-        if real_time:
-            elapsed = _time_mod.perf_counter() - frame_start
-            frame_times.append(elapsed * 1000.0)  # ms
-            # 仅在明确设定了目标帧率时 sleep
-            if target_frame_s > 0:
-                sleep_needed = target_frame_s - elapsed
-                if sleep_needed > 0:
-                    _time_mod.sleep(sleep_needed)
-
-        # 检测 ExitGame 是否被触发
-        for evt in logger.events:
-            if evt["action"] == "stop" and evt["node_type"] == "ExitGame":
-                exit_requested = True
-                break
-
-        if exit_requested:
-            print(f"\n  [ExitGame] triggered at frame {frame} (t={ctx.elapsed_time:.1f}s)")
-            break
-
-    # ── 5. 触发 OnGameStop ──
-    print("\n── OnGameStop ──")
-    try:
-        evaluator.trigger("OnGameStop", ctx)
-    except Exception as e:
-        errors.append(f"OnGameStop error: {e}")
-
-    # ── 汇总 ──
-    print(f"\n{logger.summary()}")
-
-    # ── 性能统计 (仅 real_time 模式) ──
-    perf = None
-    if real_time and frame_times:
-        import statistics
-        frame_times_sorted = sorted(frame_times)
-        n = len(frame_times_sorted)
-        perf = {
-            "frames_measured": n,
-            "min_ms": min(frame_times_sorted),
-            "max_ms": max(frame_times_sorted),
-            "avg_ms": sum(frame_times_sorted) / n,
-            "median_ms": statistics.median(frame_times_sorted),
-            "p99_ms": frame_times_sorted[int(n * 0.99)] if n > 1 else frame_times_sorted[0],
-        }
-        print(f"\n  ── Frame Performance ({n} frames) ──")
-        print(f"  Min:    {perf['min_ms']:8.3f} ms")
-        print(f"  Max:    {perf['max_ms']:8.3f} ms")
-        print(f"  Avg:    {perf['avg_ms']:8.3f} ms")
-        print(f"  Median: {perf['median_ms']:8.3f} ms")
-        print(f"  P99:    {perf['p99_ms']:8.3f} ms")
-
-    from collections import Counter
+    dr = run_dry_run(scene_data, frames=int(max_frames))
+    events = list(dr.get("log") or [])
+    if verbose:
+        for e in events:
+            print(f"  [TRACE] #{e['node_id']}<{e['node_type']}> {e['action']} | {e['detail']}")
     return {
-        "frames_simulated": frame,
-        "total_events": len(logger.events),
-        "events_by_type": dict(Counter(e["node_type"] for e in logger.events)),
-        "errors": errors,
-        "perf": perf,
+        "frames_simulated": int(dr.get("frames_simulated", 0)),
+        "total_events": int(dr.get("total_events", 0)),
+        "events_by_type": dict(dr.get("events_by_type") or {}),
+        "errors": list(dr.get("errors") or []),
+        "perf": None,
     }
 
 
@@ -439,109 +495,73 @@ def dry_run_simulation(
 # CLI
 # ═══════════════════════════════════════════════════════════════
 
-def main():
+def main() -> int:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Node Graph Validator — static checks + dry-run simulation"
+        description="Node Graph Validator — L1 静态 + L2 干跑（与在线编辑器同源）"
     )
-    parser.add_argument(
-        "scene_path",
-        help="Path to .scene JSON file (e.g. Test/TestProject/MI.scene)",
-    )
-    parser.add_argument(
-        "--frames", "-n",
-        type=int,
-        default=0,
-        help="Run dry-run simulation for N frames (0 = static check only)",
-    )
-    parser.add_argument(
-        "--verbose", "-v",
-        action="store_true",
-        help="Verbose mode — print per-node execution traces",
-    )
-    parser.add_argument(
-        "--static-only", "-s",
-        action="store_true",
-        help="Static check only (skip dry-run even if --frames is set)",
-    )
-    parser.add_argument(
-        "--real-time", "-r",
-        action="store_true",
-        help="Real-time mode — use time.sleep() between frames to measure real performance "
-             "(default: fake-time with simulated delta). Useful for profiling BCI/device nodes.",
-    )
-    parser.add_argument(
-        "--fps",
-        type=float,
-        default=0.0,
-        help="Target FPS in real-time mode. 0 = unrestricted (measure raw throughput, "
-             "no throttling); >0 = use time.sleep() to maintain that frame rate "
-             "(useful for simulating real-time constraints).",
-    )
+    parser.add_argument("scene_path", help="Path to .scene JSON (or bare graph JSON)")
+    parser.add_argument("--frames", "-n", type=int, default=0,
+                        help="Dry-run N frames (0 = static only)")
+    parser.add_argument("--verbose", "-v", action="store_true",
+                        help="Print per-node dry-run traces")
+    parser.add_argument("--static-only", "-s", action="store_true",
+                        help="Static check only (skip dry-run even if --frames is set)")
+    parser.add_argument("--real-time", "-r", action="store_true",
+                        help=argparse.SUPPRESS)
+    parser.add_argument("--fps", type=float, default=0.0,
+                        help=argparse.SUPPRESS)
     args = parser.parse_args()
 
-    # ── 加载 scene JSON ──
     scene_path = args.scene_path
     if not os.path.isabs(scene_path):
-        scene_path = os.path.join(_project_root, scene_path)
-
+        scene_path = os.path.abspath(scene_path)
     if not os.path.exists(scene_path):
         print(f"ERROR: File not found: {scene_path}")
-        sys.exit(1)
+        return 2
 
     with open(scene_path, "r", encoding="utf-8") as f:
         scene_data = json.load(f)
 
-    # ═══════════════════════════════════════════════════════
-    # L1: 静态检查
-    # ═══════════════════════════════════════════════════════
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  L1: Static Validation — {os.path.basename(scene_path)}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
-    static_errors = validate_static(scene_data)
+    entries = check_graph(scene_data)
+    static_errors = [e for e in entries if e["level"] == "error"]
+    static_warnings = [e for e in entries if e["level"] == "warning"]
     if static_errors:
-        print(f"\n  FAILED — {len(static_errors)} issue(s):\n")
+        print(f"\n  FAILED — {len(static_errors)} error(s):\n")
         for err in static_errors:
-            print(f"    ✗ {err}")
+            print(f"    x {err['message']}")
     else:
-        print(f"\n  ✓ PASSED — no static issues found")
+        print("\n  PASSED — no static errors")
+    for warn in static_warnings:
+        print(f"    ! {warn['message']}")
 
-    # ═══════════════════════════════════════════════════════
-    # L2: 干跑模拟
-    # ═══════════════════════════════════════════════════════
     dry_run_errors: list[str] = []
     if args.frames > 0 and not args.static_only:
         result = dry_run_simulation(
-            scene_data,
-            max_frames=args.frames,
-            verbose=args.verbose,
-            real_time=args.real_time,
-            target_fps=args.fps,
-        )
+            scene_data, max_frames=args.frames, verbose=args.verbose)
         dry_run_errors = result.get("errors", [])
         if dry_run_errors:
             print(f"\n  Dry-run errors ({len(dry_run_errors)}):")
             for err in dry_run_errors:
-                print(f"    ✗ {err}")
+                print(f"    x {err}")
         else:
-            print(f"\n  ✓ Dry-run completed — {result['frames_simulated']} frames, "
+            print(f"\n  Dry-run completed — {result['frames_simulated']} frames, "
                   f"{result['total_events']} side-effect events")
 
-    # ── 最终退出码 ──
     total_errors = len(static_errors) + len(dry_run_errors)
-    if total_errors > 0:
-        print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
+    if total_errors:
         print(f"  RESULT: {total_errors} issue(s) total — FIX BEFORE PIE")
-        print(f"{'='*60}")
-        sys.exit(1)
     else:
-        print(f"\n{'='*60}")
-        print(f"  RESULT: All checks passed ✓")
-        print(f"{'='*60}")
-        sys.exit(0)
+        print("  RESULT: All checks passed")
+    print(f"{'=' * 60}")
+    return 0 if total_errors == 0 else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

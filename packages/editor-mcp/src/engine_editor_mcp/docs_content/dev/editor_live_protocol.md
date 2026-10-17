@@ -119,8 +119,9 @@ flowchart LR
 
 ### 4.2 v4 — 图校验 / 图导入导出 / 工程 / 扩展（12 条; 2026-10-02 起源, 扩展体系 2026-10-11 追加）
 
-图校验已内化为**引擎服务**（`Application/Core/NodeGraph/validation/`, 协议详见 `graph_validation_protocol.md`）——
-UI / MCP / 程序三入口共用同一服务实例；离线 `validate_graph` 已弃用退场。
+图校验服务在**引擎内**（`Application/Core/NodeGraph/validation/`, 协议详见 `graph_validation_protocol.md`）——
+UI / MCP / 程序三入口共用同一服务实例；L1 规则实现只有一份（离线包 `node_graph_validator`，
+引擎侧 `checks.py` 为薄适配器），离线 `validate_graph` MCP 工具已移除。
 
 | op | MCP 工具 | 语义 |
 |---|---|---|

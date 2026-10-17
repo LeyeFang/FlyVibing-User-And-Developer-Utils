@@ -24,7 +24,7 @@
 | 编辑器交互层 | `Application/Editor/UI/panels/node_editor/**` | 画布渲染 / Add 菜单 / 内联控件 / 级联删除交互 / 自动布局（imgui） |
 | Agent 参考文档 | `FlyVibing-User-And-Developer-Utils/packages/node-editor/rules.md` | 构图 agent 参考（**按节读取**: get_rules(section=...) / CLI rules; 无参=目录）；含 build_graph Spec 节 |
 | Agent 通道 | `FlyVibing-User-And-Developer-Utils/packages/node-editor/mcp_server.py` + `cli.py` | MCP 4 工具（get_rules(分节) / get_scene_entities / build_graph / apply_graph；`validate_graph` 已移除）; CLI: `python -m flyvibing_node_editor.cli {rules,entities,build,apply}` |
-| 校验器（旧） | `FlyVibing-User-And-Developer-Utils/packages/node-editor/node_graph_validator.py` | L1 静态 + L2 干跑 — **已退场**（仅旧脚本/单元测试复用）；校验单一事实源 = 引擎内服务（`graph_validation_protocol.md`） |
+| 校验器（唯一实现） | `FlyVibing-User-And-Developer-Utils/packages/node-editor/node_graph_validator.py` | L1 规则唯一实现（`check_graph` / `validate_static`）+ L2 干跑委托 `validation.dry_run`；引擎侧 `validation/checks.py` 是薄适配器（`graph_validation_protocol.md`） |
 | 构图器 | `FlyVibing-User-And-Developer-Utils/packages/node-editor/graph_builder.py` | 程序化构图 + `validate()`；节点 helper（siggen_* / pool_* / epoch_* / fbscp_* / cca_* / show_media） |
 
 > 旧路径 `Application/Editor/UI/controllers/node_editor/` 仅保留包级 re-export shim（弃用）；

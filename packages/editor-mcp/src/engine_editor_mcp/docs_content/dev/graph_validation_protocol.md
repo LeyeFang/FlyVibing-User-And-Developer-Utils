@@ -1,18 +1,23 @@
 # graph_validation_protocol.md — 节点图校验协议（引擎内服务）
 
 > 消费者：agent / 开发者。**改校验规则、干跑语义、报告格式、Validate UI、图导入导出时必读本文。**
-> 状态：2026-10-02 落地（v4）。离线校验（`FlyVibing-User-And-Developer-Utils/packages/node-editor/node_graph_validator` 链路）已退场。
+> 状态：2026-10-02 落地（v4）；**2026-10-17 校验实现单一化** —— L1 规则唯一实现迁至离线工具包
+> `flyvibing_node_editor/node_graph_validator.check_graph`，引擎侧 `checks.py` 降为薄适配器。
 
 ---
 
 ## 1. 定位（单一事实源）
 
-节点图校验**在引擎内执行**，唯一定义于 `Application/Core/NodeGraph/validation/`：
+校验**服务**在引擎内执行；**规则实现只有一份**（离线设计期与在线校验同源）：
 
 ```
-validation/
-    checks.py    # L1 静态检查: static_check_graph(scene_data) → list[{level, code, message, node_id}]
+FlyVibing-User-And-Developer-Utils/packages/node-editor/src/flyvibing_node_editor/
+    node_graph_validator.py   # L1 规则唯一实现: check_graph(scene_data) + CLI（离线可用）
+
+Application/Core/NodeGraph/validation/
+    checks.py    # L1 薄适配器 → node_graph_validator.check_graph（缺包时报安装指引）
     dry_run.py   # L2 干跑: run_dry_run(graph_data, frames, dt, seed, progress_cb, cancel_event)
+                 #    （唯一实现；离线 dry_run_simulation 委托到它）
     service.py   # 任务服务: ValidationService (start/state/report/cancel) + run_validation() 同步链
 ```
 
@@ -23,8 +28,11 @@ validation/
 | UI | Node Editor 面板工具栏 **Validate** 按钮 | 选项: 静态 / 360 帧 / 600 帧; 完成后自动弹报告窗口 |
 | MCP | `graph.validate.start/state/report/cancel`（LiveCommandServer）+ `editor_graph_validate` 等工具（full 档口径; lite 档用 `engine_validate_graph` / CLI `validate`） | 阻塞编排工具内部 start→poll→report |
 | 程序 | `run_validation(graph, options)`（同步） | `PlayerBootstrap.dry_run` 与无头测试使用 |
+| 离线 | `python -m flyvibing_node_editor.node_graph_validator <scene> [--frames N]` / `GraphBuilder.validate()` | 与在线同一实现，无需引擎运行 |
 
-**离线 `validate_graph` 已弃用**（`FlyVibing-User-And-Developer-Utils/packages/node-editor/mcp_server.py` 仅返回指引）；agent 干跑验证需要引擎运行中。
+**离线 MCP 工具 `validate_graph` 已移除**（`mcp_server.py` 不再提供）；离线校验走上面的 CLI。
+引擎侧缺工具包时显式报 `ValidationBackendUnavailable`（含安装命令，不静默降级）。
+导出游戏包会随运行时镜像带上 `flyvibing_node_editor`，保证 `player.bat --dry-run` 可用。
 
 ## 2. 输入源
 
@@ -46,7 +54,7 @@ scene 文件格式（`{"scene": {"node_graph": ...}}`）由 `extract_graph_data`
 | `missing_pin` | error | 实例 pin_ids 缺少模板引脚（标记 `optional` 的版本兼容 pin 除外；`NodeCanvas.from_dict` 加载时自动补齐） |
 | `pin_collision` | error | Pin ID 全局冲突 |
 | `link_endpoint` / `link_direction` / `duplicate_link` / `malformed_link` | error | 连线端点/方向/重复/结构错误 |
-| `isolated_node` | **warning** | 孤立节点（可能是刻意保留 — 离线版为 error, 内化时降级） |
+| `isolated_node` | **warning** | 孤立节点（可能是刻意保留 —— 与离线同一实现） |
 | `required_pin_unconnected` | error | 必连引脚（当前仅 `Branch.Condition`） |
 | `siggen_pairing` | error | 设备 Init/Kill 强制配对（规则源: `graph_constraints.*_pairing_errors`） |
 | `pool_pairing` / `pool_reference` | error | 设备池 Create/Kill 配对 + Add/设备引用池校验（`pool_pairing_errors` / `pool_reference_errors`） |
@@ -124,6 +132,6 @@ UI 面板 Import/Export 按钮与新 op 并存（面板现有实现行为一致�
 
 ## 10. 扩展指引
 
-- **新增静态规则**: 在 `checks.py` 加检查段（沿用 `_entry(level, code, message, node_id)`），如有配套约束放 `graph_constraints.py`；
+- **新增静态规则**: 改 `flyvibing_node_editor/node_graph_validator.py::check_graph`（沿用 `_entry(level, code, message, node_id)`）—— 离线与在线同时生效；如有配套约束放 `Application/Core/NodeGraph/graph_constraints.py`；
 - **新增干跑选项**: `service._default_options` 白名单 + `run_validation` 传递（`frames/dt/seed/verbose` 现有四项）；
 - **算法章节预留钩子**: 算法契约验证（`AlgorithmBase` 合规检查）后续作为新 checker 接入 `static_check_graph` 或独立子检查，报告结构复用本文 §6。

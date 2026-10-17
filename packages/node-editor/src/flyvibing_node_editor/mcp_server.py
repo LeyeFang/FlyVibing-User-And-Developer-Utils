@@ -10,9 +10,11 @@ Tools:
 CLI（等价的终端通道, 零常驻上下文成本）:
   python -m flyvibing_node_editor.cli rules|entities|build|apply ...
 
-校验: 图校验已内化为引擎服务 — 引擎运行中: engine-editor MCP `engine_validate_graph` /
-`engine-editor-cli validate`; 无头环境: PlayerEntry --dry-run。
-旧 `validate_graph` 工具已于 2026-10-05 移除（曾仅返回弃用指针）。
+校验: L1 规则唯一实现在 `flyvibing_node_editor.node_graph_validator`（离线 CLI:
+`python -m flyvibing_node_editor.node_graph_validator <scene>`）；引擎运行中时也可用
+engine-editor MCP `engine_validate_graph` / `engine-editor-cli validate`（同一实现）。
+无头环境: `PlayerEntry --dry-run`。
+旧 `validate_graph` MCP 工具已于 2026-10-05 移除（曾仅返回弃用指针）。
 
 启动方式:
   python -m flyvibing_node_editor.mcp_server
