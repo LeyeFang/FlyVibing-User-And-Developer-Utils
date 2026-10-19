@@ -1,7 +1,7 @@
 """Op registry — 编辑器 Live op 的单一事实源（CLI / 精简 MCP / 文档生成共用）。
 
 数据来源与责任:
-  - 引擎侧实现: Application/Editor/Services/LiveCommandServer.py `_register_ops()`（48 ops）;
+  - 引擎侧实现: Application/Editor/Services/LiveCommandServer.py `_register_ops()`（59 ops）;
   - 本注册表是 agent 侧（CLI/MCP/Skill）的唯一元数据来源;
   - 新增 op 时: 引擎侧注册实现 → 本表加条目 → `python -m engine_editor_mcp.docgen` 重生成 ops.md;
   - 完整性由 Test/Application/Editor/test_editor_mcp_package.py 对照引擎源码守卫。
@@ -42,6 +42,7 @@ class OpSpec:
 CATEGORY_ORDER = [
     ("sim", "运行控制"),
     ("view", "视图 / 摄像机"),
+    ("ui", "界面面板"),
     ("renderer", "渲染器诊断"),
     ("entity", "实体"),
     ("selection", "选中"),
@@ -70,6 +71,12 @@ OPS: dict[str, OpSpec] = {o.name: o for o in [
            (Param("mode", "enum", True, '"3d" / "2d" / "overlay"'),)),
     OpSpec("view.set_grid", "view", "显示/隐藏编辑器视口网格（View 菜单 Show Grid 同路径）",
            (Param("visible", "bool", True, "true=显示 false=隐藏"),)),
+    # ── ui panels ──
+    OpSpec("ui.panels", "ui", "列出编辑器面板（内置 + 扩展窗口）及可见性"),
+    OpSpec("ui.panel", "ui", "读/写单个面板可见性（打开/关闭；与 View 菜单同路径）",
+           (Param("name", "str", True, "面板名（ui.panels 列表；如 Node Editor/Scene/Settings）"),
+            Param("visible", "bool", False, "true=打开 false=关闭（省略 = 只读）"),
+            Param("toggle", "bool", False, "true=取反（可选；与 visible 二选一）"))),
     # ── renderer ──
     OpSpec("renderer.snapshot", "renderer",
            "渲染器状态快照（后端 / GL 信息 / 资源计数 / 视口 / 帧统计; 无头时 available=false）"),
@@ -94,15 +101,21 @@ OPS: dict[str, OpSpec] = {o.name: o for o in [
             Param("parent", "str", False, '父实体 id/名称；"none"=强制根实体')),
            detail="返回: {entity_id, name, components, ...} — 后续 op 用 id=entity_id。"),
     OpSpec("entity.rename", "entity", "重命名实体（不强制唯一）", _E + (Param("new_name", "str", True, ""),)),
-    OpSpec("entity.delete", "entity", "删除实体（连同子实体）", _E),
+    OpSpec("entity.delete", "entity", "删除实体（scope: one/tree/list；默认 tree）",
+           _E + (Param("ids", "json", False, "实体 id/名称列表（可选）"),
+                 Param("scope", "enum", False, "one / tree（默认） / list"),
+                 Param("reparent_children", "bool", False, "scope=one 时子实体重挂到父级（默认 true）"))),
     OpSpec("entity.transform", "entity", "设置 transform（编辑器坐标；rotation 角度；relative=相对调整）",
            _E + (Param("position", "json", False, "[x,y,z]"),
                  Param("rotation", "json", False, "[x,y,z] 角度"),
                  Param("scale", "json", False, "标量或 [x,y,z]"),
                  Param("local", "bool", False, "本地坐标"),
                  Param("relative", "bool", False, "位移加/旋转加/缩放乘（gizmo 语义）"))),
-    OpSpec("entity.visible", "entity", "设置可见性（editor=视口 / render=渲染）",
-           _E + (Param("editor", "bool", False, ""), Param("render", "bool", False, ""))),
+    OpSpec("entity.visible", "entity", "设置可见性（editor=眼图标; render=MeshRenderer；scope one/tree/list）",
+           _E + (Param("ids", "json", False, "实体 id/名称列表（可选）"),
+                 Param("scope", "enum", False, "one / tree / list；editor 默认 tree，render 默认 one"),
+                 Param("editor", "bool", False, "编辑器视口"),
+                 Param("render", "bool", False, "运行时渲染"))),
     OpSpec("entity.reparent", "entity", "设置父实体（parent=\"none\" 解除）",
            _E + (Param("parent", "str", True, 'id/名称/"none"'),)),
     # ── selection ──
@@ -140,16 +153,20 @@ OPS: dict[str, OpSpec] = {o.name: o for o in [
     OpSpec("resource.material.get", "resource", "材质详情（shader/颜色/纹理槽/uniform）",
            (Param("id", "int", False, "id / name 二选一"), Param("name", "str", False, ""))),
     # ── graph ──
-    OpSpec("graph.list", "graph", "节点图快照（nodes: id/type/props/pins; links）"),
+    OpSpec("graph.list", "graph", "节点图快照（nodes: id/type/alias/description/props/pins; links）"),
     OpSpec("graph.add", "graph", "添加节点（等同 Add 菜单）",
            (Param("type", "str", True, "节点类型名，如 EntitySpawn"),
             Param("props", "json", False, "节点属性 dict"),
+            Param("description", "str", False, "节点描述（agent/新手可读）"),
             Param("position", "json", False, "[x,y] 画布位置"))),
     OpSpec("graph.link", "graph", "连接两个引脚（from/to 各 {node,pin}）",
            (Param("from", "json", True, '{"node":1,"pin":"exec"}'),
             Param("to", "json", True, '{"node":2,"pin":"exec_in"}'))),
     OpSpec("graph.set_props", "graph", "更新节点属性",
            (Param("node", "int", True, "节点 id"), Param("props", "json", True, ""))),
+    OpSpec("graph.set_description", "graph", "读写节点描述（省略 description=读取；空串=清除）",
+           (Param("node", "int", True, "节点 id"),
+            Param("description", "str", False, "节点描述"))),
     OpSpec("graph.validate.start", "graph", "启动干跑校验（静态+模拟；source=canvas/graph）",
            (Param("source", "enum", False, "canvas(默认) / graph"),
             Param("graph", "json", False, "source=graph 时必填"),
@@ -170,6 +187,7 @@ OPS: dict[str, OpSpec] = {o.name: o for o in [
            (Param("graph", "json", False, "graph dict（或 path）"),
             Param("path", "str", False, ".json 文件"),
             Param("validate_first", "bool", False, "默认 true"))),
+    OpSpec("graph.fit", "graph", "视图适配全部节点（等同节点编辑器工具栏 Fit；截图前常用）"),
     # ── project ──
     OpSpec("project.open", "project", "打开 .myproj 工程（资源+场景全加载）",
            (Param("path", "str", True, ".myproj 路径"),)),
@@ -213,6 +231,7 @@ ALIASES: dict[str, tuple[str, dict[str, Any]]] = {
     "editor_graph_add": ("graph.add", {}),
     "editor_graph_link": ("graph.link", {}),
     "editor_graph_set_props": ("graph.set_props", {}),
+    "editor_graph_set_description": ("graph.set_description", {}),
     "editor_graph_export": ("graph.export", {}),
     "editor_graph_import": ("graph.import", {}),
     "editor_project_open": ("project.open", {}),
@@ -253,7 +272,7 @@ TOPIC_HELP = {
         "  engine_batch(calls)        — 一次调用顺序执行多个 op\n"
         "  engine_validate_graph(...) — 图干跑校验（detail=summary 默认）\n"
         "  engine_capture(target)     — 抓帧（图像直回; 想省 token 用 CLI capture）\n"
-        "完整档: 启动参数 --profile full 或 env MGE_MCP_PROFILE=full（44 个 editor_* 旧工具）。"
+        "完整档: 启动参数 --profile full 或 env MGE_MCP_PROFILE=full（45 个 editor_* 旧工具）。"
     ),
     "cli": (
         "engine-editor-cli（终端模式，零常驻上下文成本 — 首选）:\n"

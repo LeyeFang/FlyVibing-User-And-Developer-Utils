@@ -63,6 +63,24 @@
 
 - 示例: `engine-editor-cli call camera.set role="2d" position={"k":1}`
 
+## 界面面板
+
+### `ui.panels`
+
+列出编辑器面板（内置 + 扩展窗口）及可见性
+
+- 示例: `engine-editor-cli call ui.panels`
+
+### `ui.panel`
+
+读/写单个面板可见性（打开/关闭；与 View 菜单同路径）
+
+- `name` (str, 必填) — 面板名（ui.panels 列表；如 Node Editor/Scene/Settings）
+- `visible` (bool, 可选) — true=打开 false=关闭（省略 = 只读）
+- `toggle` (bool, 可选) — true=取反（可选；与 visible 二选一）
+
+- 示例: `engine-editor-cli call ui.panel name=VALUE visible=true`
+
 ## 渲染器诊断
 
 ### `renderer.snapshot`
@@ -113,10 +131,13 @@
 
 ### `entity.delete`
 
-删除实体（连同子实体）
+删除实体（scope: one/tree/list；默认 tree）
 
 - `id` (int, 可选) — 实体 id（id / name 二选一）
 - `name` (str, 可选) — 实体名（id / name 二选一；重名取首个）
+- `ids` (json, 可选) — 实体 id/名称列表（可选）
+- `scope` (enum, 可选) — one / tree（默认） / list
+- `reparent_children` (bool, 可选) — scope=one 时子实体重挂到父级（默认 true）
 
 - 示例: `engine-editor-cli call entity.delete id=5 name=VALUE`
 
@@ -136,12 +157,14 @@
 
 ### `entity.visible`
 
-设置可见性（editor=视口 / render=渲染）
+设置可见性（editor=眼图标; render=MeshRenderer；scope one/tree/list）
 
 - `id` (int, 可选) — 实体 id（id / name 二选一）
 - `name` (str, 可选) — 实体名（id / name 二选一；重名取首个）
-- `editor` (bool, 可选)
-- `render` (bool, 可选)
+- `ids` (json, 可选) — 实体 id/名称列表（可选）
+- `scope` (enum, 可选) — one / tree / list；editor 默认 tree，render 默认 one
+- `editor` (bool, 可选) — 编辑器视口
+- `render` (bool, 可选) — 运行时渲染
 
 - 示例: `engine-editor-cli call entity.visible id=5 name=VALUE`
 
@@ -311,7 +334,7 @@
 
 ### `graph.list`
 
-节点图快照（nodes: id/type/props/pins; links）
+节点图快照（nodes: id/type/alias/description/props/pins; links）
 
 - 示例: `engine-editor-cli call graph.list`
 
@@ -321,6 +344,7 @@
 
 - `type` (str, 必填) — 节点类型名，如 EntitySpawn
 - `props` (json, 可选) — 节点属性 dict
+- `description` (str, 可选) — 节点描述（agent/新手可读）
 - `position` (json, 可选) — [x,y] 画布位置
 
 - 示例: `engine-editor-cli call graph.add type=VALUE props={"k":1}`
@@ -342,6 +366,15 @@
 - `props` (json, 必填)
 
 - 示例: `engine-editor-cli call graph.set_props node=5 props={"k":1}`
+
+### `graph.set_description`
+
+读写节点描述（省略 description=读取；空串=清除）
+
+- `node` (int, 必填) — 节点 id
+- `description` (str, 可选) — 节点描述
+
+- 示例: `engine-editor-cli call graph.set_description node=5 description=VALUE`
 
 ### `graph.validate.start`
 
@@ -399,6 +432,12 @@
 - `validate_first` (bool, 可选) — 默认 true
 
 - 示例: `engine-editor-cli call graph.import graph={"k":1} path=VALUE`
+
+### `graph.fit`
+
+视图适配全部节点（等同节点编辑器工具栏 Fit；截图前常用）
+
+- 示例: `engine-editor-cli call graph.fit`
 
 ## 工程
 

@@ -103,6 +103,7 @@ engine-editor-cli call ext.mything.info                # 扩展 op 直接可调�
 | `entry` | 有代码则必填 | `"extension.py:create_extension"` 形式; **文件缺失 → broken**; 省略 = 仅计划（不可启用） |
 | `description` | 建议 | 菜单 tooltip / 文档 |
 | `capabilities` | 建议 | 声明所需能力。**合法值集**（与审查器 M5 同源）: `ops` / `ui` / `nodes` / `threads` / `jobs` / `settings` / `device` / `graph`。语义见 §6 能力表；`requires` 暂仅解析展示（依赖拓扑 M3） |
+| `export` | 可选 | 默认 `true`。`false` = 该扩展目录不进入 `File ▸ Export` 游戏层（本地夹具/第三方私有后端用）；导出清单 `export_excluded` 会记录路径 |
 
 **状态语义**（`extension.list` / 菜单）: `planned`（无 entry）· `disabled`（可装载未启用）·
 `enabled`（已装载）· `broken`（manifest/加载错误 — 原因在 `error` 字段与 tooltip）。

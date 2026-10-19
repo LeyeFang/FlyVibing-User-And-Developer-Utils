@@ -8,7 +8,7 @@
 两侧设置一致可改端口）。纯 socket 客户端 — 不依赖引擎源码, 可放入任何三方项目
 工作区使用（独立分发）。
 
-v0.4.0: 双档位（lite 5 工具 / full 44 工具）+ CLI + Skill 混合形态; op 注册表见 ops.py。
+v0.4.0: 双档位（lite 5 工具 / full 45 工具）+ CLI + Skill 混合形态; op 注册表见 ops.py。
 """
 
 __version__ = "0.4.0"

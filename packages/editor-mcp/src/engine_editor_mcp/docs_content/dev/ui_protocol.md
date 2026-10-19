@@ -9,13 +9,13 @@
 
 | 文件 | 职责 |
 |---|---|
-| `Application/Editor/UI/UIManager.py` | 主菜单栏（File/Edit/View/**Extensions**/Help）— **实际渲染路径**、DockSpace 布局、状态栏；菜单回调 → FileDialog 非阻塞对话框 |
+| `Application/Editor/UI/UIManager.py` | 主菜单栏（File/Edit/View/**Extensions**/Help）— **实际渲染路径**、DockSpace 布局、状态栏；菜单回调 → FileDialog 非阻塞对话框；File ▸ Open Example 扫描 `Examples/`（优先）与 `Test/TestProject/Examples/` 的顶层或一级子目录 `.myproj` |
 | `Application/Editor/Extensions/ExtensionMenu.py` | `Extensions` 菜单（扩展列表/启停/broken 展示/Rescan）；`draw_extensions_menu()` 供 UIManager 调用；与 `extension.*` ops 同路径（协议见 `Doc/ExtDev/extension_dev_protocol.md`） |
 | `Application/Editor/Extensions/ExtensionUI.py` | 扩展 UI 桥 — `ctx.ui.register_window` 实装（ExtensionPanel 异常隔离/重名防护/purge 保险丝；扩展窗口经此进出 UIManager） |
 | `Application/Editor/UI/panels/SettingsPanel.py` | **设置面板**（Edit ▸ Preferences…；左页面列表 + 右内容；页注册表 core/扩展同级 — 见 §13） |
 | `Application/Editor/EditorSettings.py` | **编辑器设置服务**（单一读写入口：键表/钳制/枚举/落盘/pending 应用 — 见 §13） |
 | `Application/Editor/I18n.py` | **UI 文案表服务**（目录驱动：`t(key)` 当前语言 → en → 键名；`register_catalog` 扩展语言包）— 协议 `Doc/Dev/i18n_protocol.md` |
-| `Application/Editor/Locale/*.json` | **语言目录**（单一事实源；`en` = 源语言；新增语言 = 新增一个 JSON 即全链跟随）— 同上协议 |
+| `Application/Editor/Locale/*.json` | **语言目录**（单一事实源；`en` = 源语言；非 en 需 `ui_complete=true` 才进设置选项）— 同上协议 |
 | `Application/Editor/UI/panels/MenuBarPanel.py` | 主菜单栏面板（**当前未注册**，保留文件 — 见 `GUI_STRUCTURE.md`）；View 菜单 = 面板开关 + Show Grid（`toggle_grid_visible` 动作单点 → `Grid.set_visible`，与 `view.set_grid` op 同路径）；Extensions 段与 UIManager 共用 `ExtensionMenu.draw_extensions_menu` |
 | `Application/Editor/UI/panels/node_editor/panel.py` | `NodeEditorPanel`：画布渲染、Add 菜单、连线创建、Delete 删除（含级联）、Rearrange 自动布局、Import/Export（经 `Application/Core/NodeGraph/graph_io` 与 agent ops 同源） |
 | `Application/Editor/UI/panels/node_editor/widgets/` | 节点内联控件包 — 注册表在 `core.py`（`@register`）；子模块 flow_io / entity_comp / device_siggen / device_pool / epoch / algorithm，**import 即注册**；设备共用助手在 `device_common.py` |
@@ -188,6 +188,8 @@
 | `sim.state` | 状态行文本（Stopped/Running） | — | D |
 | `view.set_mode` | Scene Type 3D/2D/Overlay 按钮 | 按钮高亮、编辑器视口相机投影、`scene.game_type`（决定 PIE 相机） | D + C |
 | `view.set_grid` | View 菜单 ▸ Show Grid | 菜单勾选态、视口网格显隐 | D + Q |
+| `ui.panels` | View 菜单（面板列表本体） | —（只读快照） | D |
+| `ui.panel` | View 菜单 ▸ 面板勾选 | 面板窗口显隐（与菜单勾选同一 `panel.visible` 数据层；扩展窗口同样适用） | D |
 | `camera.get` | Inspector 选中摄像机实体 | — | D |
 | `camera.set` | Inspector Camera 字段 | Inspector 回显、视口/PIE 相机生效 | D + Q |
 | `renderer.snapshot` | —（渲染器诊断） | — | — |
@@ -196,9 +198,9 @@
 | `entity.get` | Inspector 检视区 | — | D |
 | `entity.add` | 工具条 + New / 空区右键 New Entity | 树新增行；**自动选中**（高亮 + Inspector + 轮廓 + gizmo 隐藏） | D + C |
 | `entity.rename` | Inspector 名称框 | 树条目文本 | D |
-| `entity.delete` | 工具条 🗑 / 右键 Delete | 树删除；**选中级联清理**（自身或祖先被删 → 轮廓/gizmo 同步清除） | D + C |
+| `entity.delete` | 工具条 🗑 / 右键 Delete | 树删除；scope: one/tree/list（默认 tree；one 子实体重挂）；**选中级联清理**（自身或祖先被删 → 轮廓/gizmo 同步清除） | D + C |
 | `entity.transform` | Inspector Transform / gizmo 拖拽 | Inspector 数值、gizmo 位置、轮廓位置 | D + C |
-| `entity.visible` | 行首眼图标 | 眼图标态、视口显隐（含子孙递归） | D + Q |
+| `entity.visible` | 行首眼图标（editor）+ Inspector Visible 勾选（render） | scope one/tree/list（editor 默认 tree，render 默认 one）；眼图标父+子孙递归；render 只写目标 MeshRenderer（默认不递归） | D + Q |
 | `entity.reparent` | 树拖拽 | 树层级、世界变换 | D |
 | `selection.get` | Inspector 标题（Entity #id） | — | D |
 | `selection.set` | 视口点选（G/R/S 模式）/ 树点击 | Inspector 切换实体、**树自动展开祖先（reveal）**、轮廓高亮、gizmo 显示（默认 true） | C |
@@ -221,12 +223,14 @@
 | `graph.add` | Add 菜单 | 画布出现节点 | D |
 | `graph.link` | 引脚拖拽连线 | 画布连线、下游控件引用下拉更新 | D |
 | `graph.set_props` | 节点卡控件 | 卡片字段回显（引用型 props 联动见 §7） | D |
+| `graph.set_description` | 节点卡 Description 展开区 | 描述文本回显（空串=清除） | D |
 | `graph.validate.start` | 工具条 Validate | 校验任务状态（报告窗口） | D |
 | `graph.validate.state` | Validate 窗口轮询 | — | D |
 | `graph.validate.report` | Validate 报告窗口 | 报告展示；点击条目聚焦节点（UI 侧行为） | D |
 | `graph.validate.cancel` | Validate 窗口 Cancel | — | D |
 | `graph.export` | 工具条/菜单 Export | —（落盘） | — |
 | `graph.import` | 工具条/菜单 Import（validate_first） | 画布整体替换、场景 node_graph 同步 | D |
+| `graph.fit` | 工具栏 Fit | 画布视图适配全部节点 | D |
 | `project.open` | File ▸ Open Project | 场景/资源/节点图全量重载、选中清理 | D + C |
 | `project.save` | File ▸ Save Project / Save As | 场景文件落盘、窗口标题去脏标 | — |
 | `project.export` | File ▸ Export… | 审计日志输出；目标目录旧导出被干净重建（`output/` 实验数据保留） | — |
@@ -335,8 +339,8 @@ UI 字体经 `hello_imgui.load_font_ttf_with_font_awesome_icons` 加载（`Edito
 3. **数据驱动的 UI 文本同样适用**（选择集 label / 列表 / 菜单文案）——例：
    `ComponentRegistry.FIELD_CHOICES` 的值直接进检查器 Combo；守卫覆盖其字面量，
    动态拼装列表由 review 清单（§11.4）把关。
-4. 中文 UI 文案**只走 `I18n.t()`**（2026-10-12 v2：`EditorImguiLayer._merge_cjk_font` 已合并
-   系统 CJK 字体 → 中文可渲染；**字面量仍禁** — `_SAFE_RANGES` 继续拦 CJK 字面量，语言切换
+4. 中文 UI 文案**只走 `I18n.t()`**（2026-10-18 zh 已发布：`_meta.fonts` 声明字体、宿主自动合并
+   → 中文可渲染；**字面量仍禁** — `_SAFE_RANGES` 继续拦 CJK 字面量，语言切换
    由词条表驱动）。**用户数据**（场景名/实体名含中文）随字体合并可正常显示（按需光栅化）。
    面向 agent 的 JSON（op summary / 日志文本）不受限。
    → 键规范、不翻译边界（含 agent 面裁决）、目录与守卫：`Doc/Dev/i18n_protocol.md`。
@@ -395,7 +399,7 @@ SettingsPanel.unregister_pages_by_owner("ext_x")  # 扩展卸载保险丝（与 
 | 键 | 类型 | 约束 | 应用点 |
 |---|---|---|---|
 | `ui.font_scale` | float | `CLAMPS` 0.7..1.6 | `EditorImguiLayer.apply_font_scale` → `style.font_scale_main` |
-| `ui.language` | 语言代码 | 由 `Locale/*.json` **动态推导**（未知/越界 → 默认 en） | `I18n.set_language`（协议 `i18n_protocol.md` §5） |
+| `ui.language` | 语言代码 | 由 `Locale/*.json` **动态推导**（未知/越界 → 默认 en；未 `ui_complete` 的草稿不在选项内） | `I18n.set_language`（协议 `i18n_protocol.md` §5） |
 
 - **未知键 → `KeyError`**（不静默创建任意键）；非法数值 → 回默认；`set` 返回**定格值**。
 - 自由度标注：`Common` 页两项 = **L1 受控枚举**；`Export` 页模式 = L1、预设 = L0、宽高 = L2
@@ -407,9 +411,11 @@ SettingsPanel.unregister_pages_by_owner("ext_x")  # 扩展卸载保险丝（与 
 - **应用只在渲染线程帧首**：`EditorImguiLayer.OnRender` 开头 `EditorSettings.apply_pending()`
   （imgui style 是渲染线程资产）；启动期 `OnAttach` 在 `_load_fonts()` 后 `load()` + `apply_all()`；
 - 字体缩放走 imgui 1.92 **`style.font_scale_main`**（`io.font_global_scale` 已不存在）；
-- 中文字形：`_merge_cjk_font()` 以 `FontLoadingParams.merge_to_last_font = True` 合并系统 CJK 字体
-  （Windows `msyh.ttc` / macOS `PingFang.ttc` / 兜底 `simhei.ttf`）；1.92 动态字体按需光栅化，
+- 中文字形：`I18n.font_candidates()` 汇总各语言目录 `_meta.fonts`（zh 声明
+  Windows `msyh.ttc` / macOS `PingFang.ttc` / Linux Noto/WQY），`_merge_cjk_font()` 逐个合并
+  （`merge_to_last_font=True`；`CJK_FONT_CANDIDATES` 仅旧目录兜底）。1.92 动态字体按需光栅化，
   **无字形范围参数**（旧 `glyph_ranges` 方案作废），未渲染的汉字零成本。
+  **新增语言只增 JSON `_meta.fonts`，不改本层代码**（语言适配正交性）。
 
 ### 13.5 agent 侧（Action 契约）
 

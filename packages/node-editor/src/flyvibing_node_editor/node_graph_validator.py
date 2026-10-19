@@ -8,7 +8,8 @@ Node Graph Validator — 节点图校验的**单一实现**（离线 CLI 与在�
            Application.Core.NodeGraph.validation.dry_run.run_dry_run（单一实现）
 
 消费方（同源）:
-  离线: python -m flyvibing_node_editor.node_graph_validator <scene> [--frames N]
+  离线: python -m flyvibing_node_editor.node_graph_validator <scene> [--frames N] 
+        [--seconds T --dt DT]   # 绝对 fake-time（T/DT 帧数）
         flyvibing_node_editor.cli / GraphBuilder.validate / apply_graph --validate
   在线: Application/Core/NodeGraph/validation/checks.static_check_graph（薄适配器）
         ← graph.validate.*（LiveCommandServer）/ Node Editor Validate 按钮 / PlayerEntry --dry-run
@@ -47,6 +48,7 @@ _REQUIRED_CONNECTIONS = {
 }
 
 _NODE_ID_RE = re.compile(r"^Node (\d+)<")
+_ALIAS_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _entry(level: str, code: str, message: str, node_id: int | None = None) -> dict:
@@ -150,10 +152,12 @@ def check_graph(scene_data: dict) -> list[dict]:
                 ))
             all_pin_ids.add(pid)
             direction = "unknown"
+            kind = "unknown"
             known = False
             for pin_def in type_def.pins:
                 if pin_def.name == pin_name:
                     direction = pin_def.direction
+                    kind = pin_def.kind
                     known = True
                     break
             if not known:
@@ -163,7 +167,99 @@ def check_graph(scene_data: dict) -> list[dict]:
                     f"type definition (legacy pin; links on it never execute)",
                     _safe_int(nid_str),
                 ))
-            pin_map[pid] = (nid_str, pin_name, direction)
+            pin_map[pid] = (nid_str, pin_name, direction, kind)
+
+    # 2b. 节点别名：格式 + 大小写无关唯一性
+    alias_owner: dict[str, str] = {}
+    for nid_str, nd in nodes.items():
+        alias = nd.get("alias")
+        if alias in (None, ""):
+            continue
+        if not isinstance(alias, str) or not _ALIAS_RE.match(alias):
+            entries.append(_entry(
+                "error", "invalid_alias",
+                f"Node {nid_str}: invalid alias {alias!r} "
+                f"(use [A-Za-z_][A-Za-z0-9_]*)",
+                _safe_int(nid_str),
+            ))
+            continue
+        key = alias.lower()
+        if key in alias_owner:
+            entries.append(_entry(
+                "error", "duplicate_alias",
+                f"Alias {alias!r} used by Node {nid_str} and Node {alias_owner[key]}",
+                _safe_int(nid_str),
+            ))
+        else:
+            alias_owner[key] = nid_str
+
+    # 2c. 节点组元数据：组别名唯一 + 成员存在
+    group_alias: dict[str, str] = {}
+    for gid, grp in (graph.get("node_groups") or {}).items():
+        alias = grp.get("alias")
+        if alias:
+            if not isinstance(alias, str) or not _ALIAS_RE.match(alias):
+                entries.append(_entry("error", "invalid_group_alias",
+                                      f"Group {gid}: invalid alias {alias!r}"))
+            elif alias.lower() in group_alias:
+                entries.append(_entry(
+                    "error", "duplicate_group_alias",
+                    f"Group alias {alias!r} used by {gid} and {group_alias[alias.lower()]}"))
+            else:
+                group_alias[alias.lower()] = gid
+        missing = [m for m in grp.get("members") or [] if str(m) not in nodes]
+        if missing:
+            entries.append(_entry(
+                "error", "group_member_missing",
+                f"Group {gid}: members not found in graph: {missing[:5]}"))
+        slots = grp.get("slots") or {}
+        for slot_name in ("entry", "done"):
+            slot_pin = slots.get(slot_name)
+            if slot_pin is None:
+                continue
+            try:
+                slot_pin_int = int(slot_pin)
+            except (TypeError, ValueError):
+                entries.append(_entry(
+                    "error", "group_slot_invalid",
+                    f"Group {gid}: {slot_name} pin {slot_pin!r} is not an integer"))
+                continue
+            if slot_pin_int not in pin_map:
+                entries.append(_entry(
+                    "error", f"group_{slot_name}_missing",
+                    f"Group {gid}: {slot_name} pin {slot_pin} not found "
+                    f"(stale group metadata)"))
+                continue
+            _pin_nid, _pin_name, direction, kind = pin_map[slot_pin_int]
+            want_direction = "input" if slot_name == "entry" else "output"
+            if direction != want_direction or kind != "exec":
+                entries.append(_entry(
+                    "error", "group_slot_direction",
+                    f"Group {gid}: {slot_name} pin must be an exec "
+                    f"{want_direction} (got {kind} {direction})"))
+        entry_pin = slots.get("entry")
+        done_pin = slots.get("done")
+        if entry_pin is not None and done_pin is not None \
+                and int(entry_pin) == int(done_pin):
+            entries.append(_entry(
+                "error", "group_slot_collision",
+                f"Group {gid}: entry and done must be different pins"))
+        parent_gid = grp.get("parent")
+        if parent_gid and str(parent_gid) not in (graph.get("node_groups") or {}):
+            entries.append(_entry(
+                "error", "group_parent_missing",
+                f"Group {gid}: parent {parent_gid!r} not found"))
+        children = grp.get("children") or []
+        if not isinstance(children, list):
+            entries.append(_entry(
+                "error", "group_children_invalid",
+                f"Group {gid}: children must be a list"))
+        else:
+            for child in children:
+                if str(child) not in (graph.get("node_groups") or {}):
+                    entries.append(_entry(
+                        "error", "group_child_missing",
+                        f"Group {gid}: child {child!r} not found"))
 
     # 3. 连线检查
     link_set: set[tuple[int, int]] = set()
@@ -181,12 +277,18 @@ def check_graph(scene_data: dict) -> list[dict]:
             entries.append(_entry("error", "link_endpoint", f"Link {lid_str}: to_pin={to_pin} not found in any node"))
 
         if from_pin in pin_map and to_pin in pin_map:
-            _, _, from_dir = pin_map[from_pin]
-            _, _, to_dir = pin_map[to_pin]
+            _, from_name, from_dir, from_kind = pin_map[from_pin]
+            _, to_name, to_dir, to_kind = pin_map[to_pin]
             if from_dir == "input":
                 entries.append(_entry("error", "link_direction", f"Link {lid_str}: from_pin={from_pin} is input (should be output)"))
             if to_dir == "output":
                 entries.append(_entry("error", "link_direction", f"Link {lid_str}: to_pin={to_pin} is output (should be input)"))
+            if from_kind != to_kind and "unknown" not in (from_kind, to_kind):
+                entries.append(_entry(
+                    "error", "pin_kind_mismatch",
+                    f"Link {lid_str}: {from_name} is {from_kind} but {to_name} is {to_kind} "
+                    f"(exec pins can only connect to exec pins; data to data)",
+                ))
 
         pair = (from_pin, to_pin)
         if pair in link_set:
@@ -304,7 +406,7 @@ def check_graph(scene_data: dict) -> list[dict]:
             src_info = pin_map.get(src)
             if src_info is None:
                 continue  # 端点问题已由连线检查报告
-            src_nid_str, src_pin_name, src_dir = src_info
+            src_nid_str, src_pin_name, src_dir = src_info[0], src_info[1], src_info[2]
             src_type = (nodes.get(src_nid_str) or {}).get("node_type", "")
             if src_dir != "output" or src_pin_name != "device" or src_type not in _INIT_TYPES:
                 entries.append(_entry(
@@ -463,6 +565,7 @@ def dry_run_simulation(
     verbose: bool = False,
     real_time: bool = False,
     target_fps: float = 0.0,
+    dt: float = 0.0,
 ) -> dict:
     """L2: 干跑模拟 — 委托引擎 `validation.dry_run.run_dry_run`（单一实现）。
 
@@ -471,13 +574,15 @@ def dry_run_simulation(
 
     `real_time` / `target_fps` 仅为旧签名兼容而保留，已无效果 — 校验一致性
     要求确定性 fake-time；性能测量请用引擎侧校验报告的 timing 字段。
+    `dt` 可指定 fake-time 步长（秒）；0 = 引擎默认 1/60。
     """
     from flyvibing_node_editor.engine_path import ensure_engine_importable
 
     ensure_engine_importable()
     from Application.Core.NodeGraph.validation.dry_run import run_dry_run
 
-    dr = run_dry_run(scene_data, frames=int(max_frames))
+    dr = run_dry_run(scene_data, frames=int(max_frames),
+                     dt=(float(dt) if dt and float(dt) > 0 else 1.0 / 60.0))
     events = list(dr.get("log") or [])
     if verbose:
         for e in events:
@@ -504,6 +609,12 @@ def main() -> int:
     parser.add_argument("scene_path", help="Path to .scene JSON (or bare graph JSON)")
     parser.add_argument("--frames", "-n", type=int, default=0,
                         help="Dry-run N frames (0 = static only)")
+    parser.add_argument("--seconds", "-T", type=float, default=0.0,
+                        help="Dry-run absolute fake-time duration in seconds "
+                             "(overrides --frames; use with --dt)")
+    parser.add_argument("--dt", type=float, default=0.0,
+                        help="Fake-time step in seconds (default 1/60; e.g. "
+                             "0.0041666667 for 240 Hz logic frames)")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Print per-node dry-run traces")
     parser.add_argument("--static-only", "-s", action="store_true",
@@ -541,16 +652,24 @@ def main() -> int:
         print(f"    ! {warn['message']}")
 
     dry_run_errors: list[str] = []
-    if args.frames > 0 and not args.static_only:
+    frames = int(args.frames)
+    dt = float(args.dt) if args.dt and args.dt > 0 else 1.0 / 60.0
+    if args.seconds > 0:
+        if dt <= 0:
+            print("ERROR: --dt must be > 0 when --seconds is used")
+            return 2
+        frames = max(1, int(args.seconds / dt + 0.999999))
+    if frames > 0 and not args.static_only:
         result = dry_run_simulation(
-            scene_data, max_frames=args.frames, verbose=args.verbose)
+            scene_data, max_frames=frames, verbose=args.verbose, dt=dt)
         dry_run_errors = result.get("errors", [])
         if dry_run_errors:
             print(f"\n  Dry-run errors ({len(dry_run_errors)}):")
             for err in dry_run_errors:
                 print(f"    x {err}")
         else:
-            print(f"\n  Dry-run completed — {result['frames_simulated']} frames, "
+            print(f"\n  Dry-run completed — {result['frames_simulated']} frames "
+                  f"({result['frames_simulated'] * dt:.3f} s @ dt={dt:.9f}), "
                   f"{result['total_events']} side-effect events")
 
     total_errors = len(static_errors) + len(dry_run_errors)

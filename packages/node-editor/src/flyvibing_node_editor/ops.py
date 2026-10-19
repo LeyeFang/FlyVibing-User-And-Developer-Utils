@@ -1,4 +1,5 @@
-"""图谱编辑 ops — 在已有节点图上做增量修改（link / unlink / set_props / add_node / remove_node）。
+"""图谱编辑 ops — 在已有节点图上做增量修改（link / unlink / set_props / add_node / remove_node /
+set_alias / set_description / add_group / set_group）。
 
 与 bench 的 patch DSL 同一语义；供 CLI `apply-ops` 与 agent 的 stepwise 编辑使用。
 纯内存操作：返回新的 scene dict，不写文件。
@@ -7,8 +8,12 @@
 from __future__ import annotations
 
 import copy
+import re
 
-_OPS = ("link", "unlink", "set_props", "add_node", "remove_node")
+_OPS = ("link", "unlink", "set_props", "add_node", "remove_node",
+        "set_alias", "set_description", "add_group", "set_group")
+
+_ALIAS_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 _GENERIC_EXEC = {"exec", "exec_out", "out_0", "in", "exec_in", "in_0"}
 
@@ -47,12 +52,30 @@ def _types():
     return _TYPES
 
 
+def _alias_map(scene: dict) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for nid, nd in _graph(scene).get("nodes", {}).items():
+        alias = nd.get("alias")
+        if isinstance(alias, str) and alias:
+            out[alias.lower()] = int(nid)
+    return out
+
+
+def valid_alias(alias: str) -> bool:
+    return bool(_ALIAS_RE.match(alias or ""))
+
+
 def _resolve_node(scene: dict, ref, symbols: dict) -> int | None:
     nodes = _graph(scene).get("nodes", {})
     if isinstance(ref, str):
         name = ref.strip()
         if name in symbols:
             return symbols[name]
+        if name.startswith("@"):
+            name = name[1:]
+        aliases = _alias_map(scene)
+        if name.lower() in aliases:
+            return aliases[name.lower()]
         if name.startswith("#"):
             name = name[1:]
         if name.isdigit():
@@ -148,14 +171,64 @@ def apply_ops(scene: dict, ops) -> dict:
                 alias = props.pop("as", None)
             else:
                 props.pop("as", None)
-            _graph(scene)["nodes"][str(nid)] = {
+            persistent = op.get("alias")
+            if persistent is not None:
+                if not isinstance(persistent, str) or not valid_alias(persistent):
+                    errors.append(f"op[{i}] add_node: invalid alias {persistent!r}")
+                    continue
+                if persistent.lower() in _alias_map(scene):
+                    errors.append(f"op[{i}] add_node: duplicate alias {persistent!r}")
+                    continue
+            nd = {
                 "node_type": type_name,
                 "pos": [0.0, 0.0],
                 "props": props,
                 "pin_ids": pin_ids,
             }
+            if isinstance(persistent, str) and persistent:
+                nd["alias"] = persistent
+            description = op.get("description")
+            if description not in (None, ""):
+                nd["description"] = str(description)
+            _graph(scene)["nodes"][str(nid)] = nd
             if isinstance(alias, str) and alias:
                 symbols[alias] = nid
+            if isinstance(persistent, str) and persistent:
+                symbols[persistent] = nid
+            continue
+
+        if kind == "set_alias":
+            nid = _resolve_node(scene, op.get("node"), symbols)
+            if nid is None:
+                errors.append(f"op[{i}] set_alias: unknown node {op.get('node')!r}")
+                continue
+            new_alias = op.get("alias")
+            nd = _graph(scene)["nodes"][str(nid)]
+            if new_alias in (None, ""):
+                nd.pop("alias", None)
+                continue
+            if not isinstance(new_alias, str) or not valid_alias(new_alias):
+                errors.append(f"op[{i}] set_alias: invalid alias {new_alias!r}")
+                continue
+            owners = _alias_map(scene)
+            owner = owners.get(new_alias.lower())
+            if owner is not None and owner != nid:
+                errors.append(f"op[{i}] set_alias: duplicate alias {new_alias!r} (node #{owner})")
+                continue
+            nd["alias"] = new_alias
+            continue
+
+        if kind == "set_description":
+            nid = _resolve_node(scene, op.get("node"), symbols)
+            if nid is None:
+                errors.append(f"op[{i}] set_description: unknown node {op.get('node')!r}")
+                continue
+            nd = _graph(scene)["nodes"][str(nid)]
+            description = op.get("description")
+            if description in (None, ""):
+                nd.pop("description", None)
+            else:
+                nd["description"] = str(description)
             continue
 
         if kind == "set_props":
@@ -190,11 +263,42 @@ def apply_ops(scene: dict, ops) -> dict:
                 continue
             from_nid = _resolve_node(scene, src[0], symbols)
             to_nid = _resolve_node(scene, dst[0], symbols)
-            if from_nid is None or to_nid is None:
+            from_pid = None
+            slot_pid = None
+            # 组入口/出口都是「虚拟端口」：入口指向内部 pin，出口指向内部 exec_out。
+            if (from_nid is None and isinstance(src[0], str)
+                    and src[0].strip().startswith("@")):
+                from flyvibing_node_editor.node_groups import _resolve_group
+                _gid, _group = _resolve_group(scene, src[0])
+                if _group is not None:
+                    from_pid = (_group.get("slots") or {}).get(
+                        str(src[1] or "done"))
+                    if from_pid is None:
+                        errors.append(
+                            f"op[{i}] {kind}: group {src[0]!r} has no slot [{src[1]!r}]")
+                        continue
+            if (to_nid is None and isinstance(dst[0], str)
+                    and dst[0].strip().startswith("@")):
+                from flyvibing_node_editor.node_groups import _resolve_group
+                _gid, _group = _resolve_group(scene, dst[0])
+                if _group is not None:
+                    slot_pid = (_group.get("slots") or {}).get(str(dst[1] or "entry"))
+                    if slot_pid is None:
+                        errors.append(
+                            f"op[{i}] {kind}: group {dst[0]!r} has no slot [{dst[1]!r}]")
+                        continue
+            if from_nid is not None:
+                from_pid = _pin_id(scene, from_nid, str(src[1]), direction="output")
+            if from_nid is None and from_pid is None:
                 errors.append(f"op[{i}] {kind}: unknown node {src[0]!r} -> {dst[0]!r}")
                 continue
-            from_pid = _pin_id(scene, from_nid, str(src[1]), direction="output")
-            to_pid = _pin_id(scene, to_nid, str(dst[1]), direction="input")
+            if to_nid is None and slot_pid is None:
+                errors.append(f"op[{i}] {kind}: unknown node {src[0]!r} -> {dst[0]!r}")
+                continue
+            if slot_pid is not None:
+                to_pid = int(slot_pid)
+            else:
+                to_pid = _pin_id(scene, to_nid, str(dst[1]), direction="input")
             if from_pid is None or to_pid is None:
                 errors.append(
                     f"op[{i}] {kind}: unknown pin {src[1]!r}@#{from_nid} -> {dst[1]!r}@#{to_nid}; "
@@ -218,6 +322,37 @@ def apply_ops(scene: dict, ops) -> dict:
                                                "to_pin": int(to_pid)}
             continue
 
+        if kind == "add_group":
+            from flyvibing_node_editor.node_groups import add_group
+            res = add_group(scene, op)
+            if not res["ok"]:
+                errors.extend(f"op[{i}] add_group: {e}" for e in res["errors"])
+            else:
+                scene = res["scene"]
+                symbols.update(res.get("symbols") or {})
+            continue
+
+        if kind == "set_group":
+            from flyvibing_node_editor.node_groups import update_group
+            res = update_group(scene, op)
+            if not res["ok"]:
+                errors.extend(f"op[{i}] set_group: {e}" for e in res["errors"])
+            else:
+                scene = res["scene"]
+                symbols.update(res.get("symbols") or {})
+            continue
+
         errors.append(f"op[{i}] unknown op {kind!r}")
 
+    if not errors:
+        graph = _graph(scene)
+        max_id = 0
+        for nid_s, nd in (graph.get("nodes") or {}).items():
+            max_id = max(max_id, int(nid_s))
+            for pid in (nd.get("pin_ids") or {}).values():
+                max_id = max(max_id, int(pid))
+        for ld in (graph.get("links") or {}).values():
+            max_id = max(max_id, int(ld.get("id", 0)),
+                         int(ld.get("from_pin", 0)), int(ld.get("to_pin", 0)))
+        graph["next_id"] = max_id + 1
     return {"ok": not errors, "errors": errors, "scene": scene, "symbols": symbols}

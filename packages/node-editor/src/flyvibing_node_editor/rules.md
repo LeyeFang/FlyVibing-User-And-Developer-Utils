@@ -29,11 +29,17 @@
   "node_type": "<type_name>",
   "pos": [<x>, <y>],
   "props": { <key>: <value>, ... },
-  "pin_ids": { "<pin_name>": <int>, ... }
+  "pin_ids": { "<pin_name>": <int>, ... },
+  "alias": "<optional_name>",
+  "description": "<optional_free_text>"
 }
 ```
 
 - `pin_ids`: 实例级唯一定义的 pin ID。所有连线引用这些 ID,而非类型模板的 PinDef ID。
+- `alias`: 可选的人可读别名（类似变量名 vs 地址）。`[A-Za-z_][A-Za-z0-9_]*`，图内大小写无关唯一；
+  不影响运行时，只影响工具/flow/搜索。编辑 ops 里可用 `@alias` 或裸 alias 引用节点。
+- `description`: 可选的人/agent 可读说明（意图、输入输出、范式含义）。不影响运行时；
+  写/改/清用 `set_description`，`add_node` 也可直接带 `description`；`graph.list` 会返回。
 - 事件节点 (OnGameStart/OnFrameUpdate/OnGameStop) 固定 ID: 161/163/166
 
 ### LinkInstance
@@ -48,6 +54,125 @@
 
 - `from_pin`: 必须是 output pin 的 ID
 - `to_pin`: 必须是 input pin 的 ID
+
+---
+
+## Node Groups (tools-level macro)
+
+`node_graph.node_groups` 是 **可选** 元数据（引擎**不透明保留**、不参与求值；
+`graph.export` / 场景保存会原样带回）。组插入时已展开成普通
+nodes/links，组只是一层可重展开的记账：
+
+```json
+"node_groups": {
+  "g1": {
+    "type": "cue_n_way",
+    "version": 1,
+    "alias": "cue_rand",
+    "params": {"addr": 16376, "arms": [{"id": "left", "entity": "L", "code": 3}]},
+    "members": [<node ids>],
+    "chain_members": [<decision chain ids>],
+    "arm_members": {"left": {"get": 1, "set": 2, "send": 3, "code": 4}},
+    "slots": {"entry": <pin id>, "done": null},
+    "parent": "g2",
+    "children": ["g3"]
+  }
+}
+```
+
+外部只能用 `"to": ["@cue_rand", "entry"]` 接进组；`set_group` 按 arm `id` 差分重展开，
+未变 arm 的动作节点 ID 保持不变。模板与参数说明见 `README.md`。
+
+### cue_window（每帧窗口组）
+
+`cue_window` 是**每帧求值**的线性组，边界只有 `entry` / `done` 两个 exec 槽：
+
+- `entry`：父链每次执行到这里就进入（不是一次性开始事件）。
+- `done`：本次求值结束，继续父链（不是退出事件）。
+  `done` 是**每帧都会走**的普通 exec 出口；需要“2 s 到点只触发一次”时用独立的
+  `TimeTrigger(timer=..., time=2)`，不要把它接到 `done`。
+- 组内每帧重新计算 `start <= elapsed < end`，并写一次 `EntitySetRenderVisible`：
+  窗口内 `Visible=true`（`visible=false` 时取反），窗口外 `Visible=false`。
+  因此**组自己负责 enter/exit**，外部不需要再写隐藏。
+
+```json
+{"op": "add_group", "group_type": "cue_window", "alias": "class_cue",
+ "params": {"clock": "trial_phase", "start": 0, "end": 2, "entity": "TaskCue"}}
+```
+
+展开为：`TimeGetElapsed(clock)` → `Compare(gte,start)` + `Compare(lt/end)` →
+`Compare(and)` → `EntityGet(entity)` → `EntitySetRenderVisible(Visible=active)`。
+`include_end=true` 时区间为 `[start,end]`；`visible=false` 时窗口内写 `false`。
+`entry` 接 `OnFrameUpdate` 即可；`done` 可接后续节点或用 `"from": ["@class_cue", "done"]`
+继续。嵌套组加 `"parent": "@外层组"`，父组 `children` 记录子组；执行关系仍由
+`@父组.done -> @子组.entry` 这类显式连线表达。
+
+**单写者**：同一实体/属性只允许一个窗口组写；多个窗口重叠时，改成单个组内先算 phase
+（`Compare`/`and` 组合）再写一次，或显式经过优先级节点，不依赖链顺序。
+
+### hide_group（按实体树批量显隐）
+
+线性组，`entry` / `done` 各一个 exec 槽。对每个根实体做 `EntityGet → EntityGetTree`，
+再 `EntityListMerge`（多个根）→ `EntityListSetVisible`：
+
+```json
+{"op": "add_group", "group_type": "hide_group", "alias": "rest_cue",
+ "params": {"entities": ["LeftCue", "RightCue", "NullCue", "TaskCue"],
+            "visible": false}}
+```
+
+`entities` 是运行时实体名（通常传容器根，树内网格一起处理）；`visible=false` 为隐藏。
+适合在 6 s 用 `TimeTrigger` 触发一次，而不是每帧执行。
+
+### mi_select（MI 类别 → 可见 cue）
+
+```json
+{"op": "add_group", "group_type": "mi_select", "alias": "mi_select",
+ "params": {"mi_var": "mi_code", "arms": [
+   {"id": "left",  "entities": ["L_arrow_body", "L_arrow_head"], "code": 1},
+   {"id": "right", "entities": ["R_arrow_head", "R_arrow_body"], "code": 2},
+   {"id": "none",  "entities": ["part1", "part2"], "code": 3}]}}
+```
+
+线性组：`Random(1..N) → VarSet(mi_var)`，再对每个 arm 做 `Compare(mi_code==code)`，并对该 arm
+的每个实体 `EntityGet → EntitySetRenderVisible`。没有 Branch；`entry` 是 `VarSet.exec_in`，
+`done` 是最后一个 `EntitySetRenderVisible.exec_out`。**每次 entry 会重新抽 Random**，应在
+phase0 起点用 `TimeTrigger` 调用一次，不能接每帧 Update。
+
+### phase0_trigger（cue onset 触发）
+
+线性组：`VarGet(mi_code) * mi_scale + VarGet(sss_code) → VarSet(trigger_val) → ParallelSend`。
+`entry` 在 `VarSet(trigger_val).exec_in`，`done` 在 `ParallelSend.exec_out`；每次 entry 发送一次，
+适合接在 cue 稳定后的 OneShot 逻辑中。参数 `mi_scale` 默认 32，`address` 默认 16376。
+
+### sss_pulse（20 Hz 脉冲）
+
+线性组：`VarGet(sss_code)` 同时送 `ParallelSend` 与 `SerialSend`，随后 `pulse_count += 1`，
+最后 `SetTimer(pulse, interval)` 重装定时器。`entry` 在 `ParallelSend.exec_in`，`done` 在
+`SetTimer.exec_out`。组本身不判断 20 Hz 窗口和上限；前置条件（如 `count<80` 且 `trial_phase<6`）
+由外层 gate 负责，避免在 rest 段继续发脉冲。
+
+`interval` 是负的 timer 重装值：240 Hz 逻辑线程下默认 `-0.0499` 才能稳定落在
+12 帧（50 ms）；`-0.05` 会在浮点边界变成 13 帧，实际约 18.5 Hz，80 次脉冲窗口会漏发。
+
+### container（外层嵌套组）
+
+`container` 不生成执行节点，只把已有子组包成外层组（用于组框/嵌套/单入口单出口）：
+
+```json
+{"op": "add_group", "group_type": "container", "alias": "trial",
+ "params": {
+   "children": ["@class_cue", "@task_cue", "@rest_cue"],
+   "entry": ["phase", "exec_in"],
+   "done": ["next_trial", "exec_out"],
+   "members": ["phase", "tt_rest", "tt_next"]
+ }}
+```
+
+- `children` 的子组自动写 `parent`，外层组写 `children`。
+- `entry`/`done` 可省略：默认取第一个子组 entry / 最后一个子组 done。
+- `members` 可追加 gate 节点，让组框覆盖整个试次；实际执行仍由图中显式连线决定。
+- 子组 `set_group` 重展开后，外层容器的 `members` 会自动刷新。
 
 ---
 
@@ -93,10 +218,16 @@
 | type_name | input | output | props |
 |-----------|-------|--------|-------|
 | ScalarMath | In_0..In_7 (float) | Result | operation: sum/sub/mul/div |
-| Compare | A,B (float) | Result(bool) | operation: gt/lt/eq/neq/gte/lte |
+| Compare | A,B (variant), C (float, 可选) | Result(bool) | operation: gt/lt/eq/neq/gte/lte/and/or/not/xor/in/not_in(out)/between; between 半开区间 B<=A<C, include_end=true 时闭区间 |
+| MakeList | Item_0..Item_7 (variant, 可选) | List(variant) | — (纯数据: 跳过未连接槽位, 常用来给 in/not_in 提供候选集合) |
 | Constant | — | Result(float) | value: float |
 | RandomSetSeed | exec_in, exec_out, Seed(int) | (exec_out) | source: hardware/manual/pin |
 | Random | Min,Max,Mean,StdDev | Result(float) | distribution: uniform/gaussian/discrete, mode: manual/pin |
+
+`Compare` 的 `and`/`or`/`not`/`xor` 是布尔组合（A/B 取真值，`not` 只用 A）；`in`/`not_in` 支持列表、字符串与 EntityRef：`A` 是要测试的值，`B` 是列表
+（可由 `MakeList` 或 `EntityPack`/`EntityGetTree` 提供）；`not_in` 也可写 `out`。
+`between` 用 `B <= A < C`（半开），`include_end=true` 改为 `B <= A <= C`；`C` 未连接
+时区间上界为 0。旧的 `gt/lt/eq/neq/gte/lte` 仍按数值比较。
 
 ### Time (✅ has timer support)
 | type_name | input | output | props |
@@ -105,7 +236,12 @@
 | TimeTrigger | exec_in, Time(float) | Elapsed, out_0..out_7 (exec×8) | mode: manual/pin, time: float, **timer**: "" or name |
 | TimeGetDate | — | DateString(string) | year/month/day/hour/minute: bool, format: str |
 | NewTimer | exec_in, Name(string) | exec_out | mode: manual/pin, timer_name: str |
-| SetTimer | exec_in, Value(float) | exec_out | operate: reset/set_time, mode: manual/pin, timer_name: str, value: float |
+| SetTimer | exec_in, Value(float) | exec_out | operate: reset/set_time, mode: manual/pin, timer_name: str, value: float, create_if_missing: bool (默认 true) |
+
+`SetTimer` 默认 `create_if_missing=true`：`timer_name` 不存在时，第一次执行即创建并从该次
+写入的 `value` 开始计时（`operate=reset` 即 0；`operate=set_time` 即 value 秒）。
+`NewTimer` 变成可选（需要显式清零/固定创建位置时再用）。把 `create_if_missing=false`
+可恢复旧行为：timer 不存在时静默跳过。`TimeTrigger`/`TimeGetElapsed` 只读取，不创建。
 
 ### Variable
 | type_name | input | output | props |
@@ -120,11 +256,29 @@
 | EntityGet | exec_in, Name(string) | exec_out, Entity(ref) | entity_name: string |
 | EntitySetRenderVisible | exec_in, EntityID(int), Visible(bool) | exec_out | — |
 | EntityGroupSetVisible | exec_in, Entity1-4(ref, 可选), Visible(bool) | exec_out | — |
+| EntityGetTree | Entity(ref) | Entities(entity_list), Count(int) | — (纯数据: 先序包含根 + 全部子孙) |
+| EntityPack | Entity1-4(ref, 可选) | Entities(entity_list), Count(int) | — (纯数据) |
+| EntityListMerge | A,B(entity_list) | Entities(entity_list), Count(int) | — (纯数据: 去重保序) |
+| EntityListSetVisible | exec_in, Entities(entity_list), Visible(bool) | exec_out | — (单批原子显隐) |
+| EntityListDestroy | exec_in, Entities(entity_list) | exec_out | — (按子树删除) |
 | SetText | exec_in, Entity(ref), Text(string) | exec_out | — |
 
-多部件 cue（箭把+箭头等）显隐 MUST 用 `EntityGroupSetVisible`：同一批命令下发，
-组内实体**同帧生效**（渲染帧边界不会把一组切成两半）；`EntitySetRenderVisible`
+多部件 cue（箭把+箭头等）显隐 MUST 用 `EntityGroupSetVisible` 或 `EntityListSetVisible`：
+同一批命令下发，组内实体**同帧生效**（渲染帧边界不会把一组切成两半）；`EntitySetRenderVisible`
 保留给单实体。
+
+★ 实体层级与可见性语义（写 MI/复合 cue 图必读）：
+- `EntitySpawn(template=X)`：从 `Scene.entities` 实例化模板 X，并按 `parent_id` **递归生成全部子孙**；
+  返回的 Entity 是根实例。子实体保留模板名称，`EntityGet(子名)` 可找到。
+- `EntitySetRenderVisible`：只写**目标实体自己**的 `MeshRenderer.visible`，**不递归**。
+  容器实体（只有 Transform、无 MeshRenderer，如 MI 的 `LeftCue`）对它操作**没有任何视觉效果**。
+- `EntityGroupSetVisible` / `EntityListSetVisible`：只对列表里的实体逐一生效（单批同帧），
+  同样**不递归**；复合 cue 必须把每个带网格的子实体都接进来。
+- `EntityGetTree` 负责把“根 + 子孙”变成 `entity_list`；`EntityPack` / `EntityListMerge`
+  负责把多个实体或列表合成任意长度列表（运行时只接受 EntityRef，不接受编辑器场景 id）。
+- 编辑器眼图标（`entity.visible editor=...`）是**编辑器视口**可见性，会递归到全部子孙；
+  与运行时渲染可见性（`MeshRenderer.visible`）是两套语义。
+
 `SetText`：设置目标实体 `TextDisplay.text` 并立即重新光栅化（PIE）；目标实体需有
 `TextDisplay` 组件（字号/颜色/粗斜体等样式在组件上，编辑器/MCP 可改）。
 

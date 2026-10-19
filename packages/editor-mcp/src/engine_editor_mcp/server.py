@@ -8,7 +8,7 @@ Engine Editor Live MCP — 运行中编辑器的热注入工具（v0.4.0: 双档
     engine_batch(calls)          → 一次调用顺序执行多个 op
     engine_validate_graph(...)   → 图干跑校验（detail=summary 默认）
     engine_capture(target)       → 抓帧（图像直回; 想省 token 用 CLI capture）
-  full（兼容旧用法 — 44 个 editor_* 工具, 见下）:
+  full（兼容旧用法 — 45 个 editor_* 工具, 见下）:
     editor_run_pie / editor_stop_pie / editor_sim_state  → PIE 启停与状态
     editor_switch_2d / editor_set_scene_type             → 场景类型按钮语义（影响 PIE 摄像机）
     editor_camera_get / editor_camera_set                → 场景摄像机读写（3d / 2d / overlay）
@@ -185,7 +185,9 @@ def editor_graph_list() -> dict:
 
 
 @mcp.tool()
-def editor_graph_add(node_type: str, props: dict | None = None, position: list[float] | None = None) -> dict:
+def editor_graph_add(node_type: str, props: dict | None = None,
+                     position: list[float] | None = None,
+                     description: str | None = None) -> dict:
     """在节点图添加节点（等同 Add 菜单）。
 
     例: editor_graph_add("EntitySpawn", {"template": "DefaultCube"})
@@ -193,6 +195,8 @@ def editor_graph_add(node_type: str, props: dict | None = None, position: list[f
     args: dict = {"type": node_type}
     if props:
         args["props"] = props
+    if description is not None:
+        args["description"] = description
     if position is not None:
         args["position"] = list(position)
     return _send("graph.add", args)
@@ -211,6 +215,15 @@ def editor_graph_link(from_node: int, from_pin: str, to_node: int, to_pin: str) 
 def editor_graph_set_props(node_id: int, props: dict) -> dict:
     """更新节点属性（等同内联控件改属性）。"""
     return _send("graph.set_props", {"node": node_id, "props": props})
+
+
+@mcp.tool()
+def editor_graph_set_description(node_id: int, description: str | None = None) -> dict:
+    """读写节点描述（省略 description=读取；空串=清除）。"""
+    args: dict = {"node": node_id}
+    if description is not None:
+        args["description"] = description
+    return _send("graph.set_description", args)
 
 
 # ════════════════════════════════════════════════════════════════
@@ -658,7 +671,7 @@ def _requested_profile(argv: list[str] | None = None) -> str:
 def apply_profile(profile: str) -> str:
     """按档位裁剪工具集（幂等 — 可在任意当前档切到另一档; 返回实际档位）。
 
-    lite → 仅保留 LITE_TOOL_NAMES; full → 移除 lite 工具（恢复旧 44 工具集）。
+    lite → 仅保留 LITE_TOOL_NAMES; full → 移除 lite 工具（恢复旧 45 工具集）。
     内部结构不可用时 fail-open（保留全部并告警）。
     """
     profile = "lite" if str(profile).strip().lower() == "lite" else "full"

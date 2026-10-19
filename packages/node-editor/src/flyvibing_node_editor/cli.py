@@ -7,7 +7,8 @@
   python -m flyvibing_node_editor.cli apply --scene scene.scene --graph graph.json   # --graph - = stdin
   python -m flyvibing_node_editor.cli flow  --scene scene.scene [--event OnFrameUpdate] [--from ID] [--data]
   python -m flyvibing_node_editor.cli pins  [TypeName]
-  python -m flyvibing_node_editor.cli find  --scene scene.scene [--type T] [--prop K=V ...]
+  python -m flyvibing_node_editor.cli find  --scene scene.scene [--type T] [--alias NAME] [--prop K=V ...]
+  python -m flyvibing_node_editor.cli groups [--scene scene.scene]
   python -m flyvibing_node_editor.cli apply-ops --scene scene.scene --ops ops.json [--write]
 
 - `rules` 无 section → 目录（outline）; 有 section → 单节文本; `--all` → 全文;
@@ -187,6 +188,7 @@ def cmd_apply_ops(ns) -> int:
         "op_errors": result["errors"],
         "validation_errors": [e["message"] for e in val_errors[:5]],
         "applied": len(ops),
+        "created": result.get("symbols") or {},
         "written": bool(ns.write and result["ok"]),
         "path": scene_path,
     })
@@ -271,18 +273,61 @@ def cmd_find(ns) -> int:
         ntype = nd.get("node_type", "")
         if ns.type and ntype.lower() != ns.type.lower():
             continue
+        alias = nd.get("alias") or ""
+        description = nd.get("description") or ""
+        if ns.alias and ns.alias.lstrip("@").lower() != alias.lower():
+            continue
         props = nd.get("props") or {}
         if any(not _prop_match(props.get(k), v) for k, v in filters):
             continue
         if ns.text:
-            hay = (ntype + " " + json.dumps(props, ensure_ascii=False)).lower()
+            hay = (ntype + " " + alias + " " + description + " "
+                   + json.dumps(props, ensure_ascii=False)).lower()
             if ns.text.lower() not in hay:
                 continue
-        matches.append({"id": int(nid), "type": ntype, "props": props})
+        matches.append({"id": int(nid), "type": ntype,
+                        "alias": alias, "description": description,
+                        "props": props})
         if len(matches) >= max(1, int(ns.limit)):
             break
 
     _out({"matches": matches, "count": len(matches), "scanned": len(nodes)})
+    return 0
+
+
+def cmd_groups(ns) -> int:
+    """无 scene：列出内置组模板；有 scene：列出组实例。"""
+    from flyvibing_node_editor.node_groups import list_groups
+
+    if not ns.scene:
+        _out({"templates": list_groups()})
+        return 0
+    scene_path = _resolve(ns.scene)
+    if not os.path.exists(scene_path):
+        return _fail(f"scene not found: {scene_path}", 1)
+    try:
+        with open(scene_path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as e:
+        return _fail(f"scene 读取失败: {e}", 1)
+
+    graph = data.get("scene", data).get("node_graph") or {}
+    groups = graph.get("node_groups") or {}
+    out = {}
+    for gid, g in groups.items():
+        slots = g.get("slots") or {}
+        out[gid] = {
+            "type": g.get("type"),
+            "alias": g.get("alias", ""),
+            "version": g.get("version", 1),
+            "entry": slots.get("entry"),
+            "done": slots.get("done"),
+            "parent": g.get("parent"),
+            "children": list(g.get("children") or []),
+            "arms": [a.get("id") for a in (g.get("params", {}).get("arms") or [])],
+            "members": len(g.get("members") or []),
+        }
+    _out({"groups": out, "count": len(out)})
     return 0
 
 
@@ -371,11 +416,16 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("find", help="按类型/属性/文本搜索节点")
     p.add_argument("--scene", required=True)
     p.add_argument("--type", default="", help="节点类型（大小写不敏感）")
+    p.add_argument("--alias", default="", help="节点别名（@ 可省略）")
     p.add_argument("--prop", action="append", default=[], metavar="K=V",
                    help="属性过滤，可重复（如 --prop value=60）")
     p.add_argument("--text", default="", help="在类型+props 里做子串匹配")
     p.add_argument("--limit", type=int, default=20, help="最多返回条数")
     p.set_defaults(func=cmd_find)
+
+    p = sub.add_parser("groups", help="组模板 / 场景内的组实例")
+    p.add_argument("--scene", default="", help="省略则列出内置组模板")
+    p.set_defaults(func=cmd_groups)
 
     p = sub.add_parser("apply-ops", help="对已有节点图做增量修改（默认 dry-run）")
     p.add_argument("--scene", required=True)

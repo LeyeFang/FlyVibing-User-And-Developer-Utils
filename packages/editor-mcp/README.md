@@ -85,7 +85,7 @@ engine-editor-cli capture pie --out f.png  # 抓帧落盘（只回路径）
 
 ## 与引擎仓库的关系
 
-- 本包源码唯一维护于引擎仓库 `packages/editor-mcp/`（dev shim + 独立包源码 + 构建器 + Skill 源）；
+- 本包源码位于引擎仓库 `packages/editor-mcp/`（开发入口、独立包源码、构建器与 Skill 源）；
 - 协议细节见引擎仓库 `Doc/Dev/editor_live_protocol.md`；
 - 新增 op 后：引擎侧注册 → `ops.py` 加条目 → `python -m engine_editor_mcp.docgen` 重生成
   `skills/engine-editor/references/ops.md`（离线测试 `test_editor_mcp_package.py` 会校验一致性）。

@@ -40,4 +40,26 @@ assert len(d["nodes"]) >= 6, f"Expected >=6 nodes, got {len(d['nodes'])}"
 assert len(d["links"]) >= 2, f"Expected >=2 links, got {len(d['links'])}"
 print(f"  build: {len(d['nodes'])} nodes, {len(d['links'])} links")
 
+# entity_list helpers (tree / pack+merge / list visible / list destroy)
+g2 = GraphBuilder()
+tree = g2.entity_get_tree("CueRoot")
+tree_entry, tree_node = g2.entity_get_tree("CueRoot", with_entry=True)
+packed = g2.entity_pack("A", "B", "C", "D", "E")
+lv = g2.entity_list_set_visible((packed, "Entities"), 0.0)
+ld = g2.entity_list_destroy((tree, "Entities"))
+g2.annotate(tree_node, "cue_tree", "Fixation cross tree.")
+node_data = g2.build()["nodes"][str(tree_node)]
+assert node_data.get("alias") == "cue_tree"
+assert node_data.get("description") == "Fixation cross tree."
+types = [n["node_type"] for n in g2.build()["nodes"].values()]
+assert types.count("EntityGet") == 7, types
+assert types.count("EntityGetTree") == 2, types
+assert types.count("EntityPack") == 2, types
+assert types.count("EntityListMerge") == 1, types
+assert types.count("EntityListSetVisible") == 1, types
+assert types.count("EntityListDestroy") == 1, types
+assert len(g2.build()["nodes"]) == 15, types
+assert len(g2.build()["links"]) == 12
+print("  entity_list helpers: 15 nodes, 12 links")
+
 print("\n[OK] All GraphBuilder smoke tests passed")

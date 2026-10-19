@@ -33,13 +33,13 @@ OnGameStart ──exec──> EntitySpawn(template=<实体名>)
 |---|---|---|
 | `engine-editor-cli`（终端） | **0** | 默认首选：多步、批处理、脚本、需要过滤输出 |
 | MCP `engine_call` / `engine_batch` | ~0.7k tokens（lite 档 5 工具） | 无终端权限、或任务需要图像直回 |
-| MCP 旧 `editor_*` 工具（44 个） | ~5.6k tokens（full 档） | 仅当 `MGE_MCP_PROFILE=full` 且提示词已绑定旧工具名 |
+| MCP 旧 `editor_*` 工具（45 个） | ~5.6k tokens（full 档） | 仅当 `MGE_MCP_PROFILE=full` 且提示词已绑定旧工具名 |
 | `engine_capture`（MCP） | 同 lite | 需要**看到**画面时；否则 `engine-editor-cli capture`（只落盘） |
 
 ## 2. CLI 速查
 
 ```powershell
-engine-editor-cli ops                        # op 目录（55 个核心 op; 一行一个; 扩展 op 见 extension.list）
+engine-editor-cli ops                        # op 目录（59 个核心 op; 一行一个; 扩展 op 见 extension.list）
 engine-editor-cli help entity.transform      # 单 op 详情（参数 + 示例）
 engine-editor-cli call entity.add name=MCP_Cue
 engine-editor-cli call entity.transform id=5 position='[1,0,2]' scale=2
@@ -48,6 +48,8 @@ engine-editor-cli call component.set id=5 type=MeshRenderer fields='{"blend":"al
 engine-editor-cli call component.set id=5 type=MeshRenderer fields='{"shader":"Lighting"}'                    # 受光（默认场景含 Sun）
 engine-editor-cli call component.set name=X type=TextDisplay fields='{"text":"你好","size":72,"bold":true}'  # 文字（自动生成纹理; 见 text_protocol.md）
 engine-editor-cli call sim.play
+engine-editor-cli call ui.panels                            # 面板发现（名称 + visible + kind）
+engine-editor-cli call ui.panel name="Node Editor" visible=true   # 打开/关闭面板（View 菜单同路径；闭环）
 engine-editor-cli batch ops.json             # [{"op":...,"args":{...}}, ...]（- = stdin）
 engine-editor-cli exec build_scene.py        # 脚本模式（见 §4）
 engine-editor-cli validate                   # 干跑校验（默认 summary）
@@ -74,17 +76,19 @@ engine-editor-cli doc tools              # 开发工具索引（test_runner / th
 | `sim.play` / `sim.stop` / `sim.state` | PIE 启停与状态 |
 | `view.set_mode` | 场景类型 3d/2d/overlay（影响 PIE 摄像机） |
 | `view.set_grid` | 显示/隐藏视口网格（View 菜单 Show Grid 同路径; visible=true/false） |
+| `ui.panels` / `ui.panel` | 面板发现 / 打开关闭（等同 View 菜单勾选；`visible`/`toggle` 写入后回真实状态；扩展窗口同样适用） |
 | `threads.snapshot` | 线程注册表快照（配合 `Utils/Dev/thread_probe.py` 探针; 见 threading_protocol.md） |
 | `renderer.snapshot` | 渲染器状态快照（GL 信息/资源计数/视口/帧统计; 无头时 available=false） |
 | `entity.add` / `entity.list` / `entity.get` | 实体新建/列举/详情（id/name 寻址） |
 | `entity.transform` | 位置/旋转(角度)/缩放；`relative=true` 相对调整；`scale` 可标量 |
-| `entity.visible` / `entity.delete` / `entity.rename` / `entity.reparent` | 显隐/删除/改名/父子 |
+| `entity.visible` / `entity.delete` / `entity.rename` / `entity.reparent` | 显隐/删除/改名/父子；`visible editor=...` 与眼图标同路径（**递归子孙**，仅编辑器视口），`render=...` 只改目标实体 MeshRenderer（**不递归**） |
 | `selection.set` | 选中（截图前常用来打高亮/显示 gizmo） |
 | `component.add` / `component.set` / `component.get` | MeshRenderer: `mesh/material/material_name/color/shader/**blend**/uniform/texture/visible`；`blend`=`"opaque"|"alpha"`（透明由渲染器排序处理）；`shader` 切到 `Lighting` 可受方向光/环境光影响（切 shader 会重置材质 uniform — 先切后设参）；`TextDisplay`: `text/font/size/bold/italic/color/bg_color/align/...`（自动光栅化纹理; PIE 用 SetText 节点驱动） |
 | `scene.list` / `scene.switch` / `scene.save` / `scene.load` | 场景管理 |
-| `graph.list` / `graph.add` / `graph.link` / `graph.set_props` | 节点图编辑（等价画布操作） |
+| `graph.list` / `graph.add` / `graph.link` / `graph.set_props` / `graph.set_description` | 节点图编辑（等价画布操作；节点带 alias/description） |
 | `graph.validate.start`(→`state`/`report`) | 图干跑校验（静态+模拟; 见 §5） |
 | `graph.export` / `graph.import` | 图落盘/回灌（**export 一定带 `path`**，见 §5） |
+| `graph.fit` | 视图适配全部节点（截图/展示前常用） |
 | `project.open` / `project.save` / `project.export` | 工程：打开 `.myproj` / 保存（带 `path`=Save As）/ 导出（`target_parent` 必填; `include_player` 默认 true=自包含成品） |
 | `extension.list` / `extension.enable` / `extension.disable` | 扩展体系：发现（含 `ext.<id>.*` 扩展 op 清单）/ 启停；扩展 op 直接调（`ext.*` 透传, 如 `ext.sigproc.info`） |
 | `settings.get` / `settings.set` | 编辑器设置（UI: Edit ▸ Preferences… = Settings 面板）：`{"key":"ui.font_scale","value":1.25}`；`key` 省略 = 全量；**下一渲染帧生效** |

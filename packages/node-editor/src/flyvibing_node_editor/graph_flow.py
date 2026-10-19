@@ -60,8 +60,8 @@ _PROP_HINTS = {
     "SetTimer": ("operate", "timer_name", "value"),
     "NewTimer": ("timer_name",),
     "Random": ("distribution", "min", "max"),
-    "Compare": ("op",),
-    "ScalarMath": ("op",),
+    "Compare": ("operation",),
+    "ScalarMath": ("operation",),
     "Sequence": (),
 }
 
@@ -165,6 +165,19 @@ def analyze_flow(
         for pin_name, pid in (nd.get("pin_ids") or {}).items():
             pin_owner[int(pid)] = (nid, str(pin_name))
 
+    # 组槽位 → 内部节点；flow 行标注单进单出边界
+    group_slots: dict[int, str] = {}
+    for gid, grp in (graph.get("node_groups") or {}).items():
+        alias = str(grp.get("alias") or gid)
+        for slot_name in ("entry", "done"):
+            pin = (grp.get("slots") or {}).get(slot_name)
+            if pin is None:
+                continue
+            owner = pin_owner.get(int(pin))
+            if owner:
+                tag = "IN" if slot_name == "entry" else "OUT"
+                group_slots[owner[0]] = f"@{alias} {tag}"
+
     # 下游索引: from_pin_id → [(to_node_id, to_pin_name)]
     downstream: dict[int, list[tuple[int, str]]] = {}
     for link in links.values():
@@ -213,6 +226,8 @@ def analyze_flow(
         node_type = nd.get("node_type", "?")
         props = nd.get("props") or {}
         hint = _node_hint(node_type, props)
+        alias = nd.get("alias")
+        name = f"#{nid}@{alias}" if alias else f"#{nid}"
         tag = ""
         if node_type in GATE_TYPES:
             tag = " [GATE]"
@@ -220,14 +235,27 @@ def analyze_flow(
         elif node_type in TERMINAL_TYPES:
             tag = " [TERMINAL]"
             summary["terminals"] += 1
-        if node_type in ("TimeTrigger", "SetTimer"):
+        group_tag = group_slots.get(nid)
+        if group_tag:
+            tag += f" [group {group_tag}]"
+        if node_type == "TimeTrigger":
             timer = str(props.get("timer") or props.get("timer_name") or "")
             if timer and timer not in created_timers:
                 tag += " [NO TIMER]"
                 warnings.append(
                     f"#{nid} {node_type}: timer {timer!r} is never created (NewTimer missing)")
+        elif node_type == "SetTimer":
+            # SetTimer 默认 create_if_missing=true: 首次写入时自动创建 timer,
+            # 只有显式关闭惰性创建时才需要 NewTimer。
+            timer = str(props.get("timer") or props.get("timer_name") or "")
+            lazy = props.get("create_if_missing", True) is not False
+            if timer and not lazy and timer not in created_timers:
+                tag += " [NO TIMER]"
+                warnings.append(
+                    f"#{nid} {node_type}: timer {timer!r} is never created "
+                    f"(create_if_missing=false and NewTimer missing)")
         suffix = f" {hint}" if hint else ""
-        return f"#{nid} {node_type}{suffix}{tag}"
+        return f"{name} {node_type}{suffix}{tag}"
 
     def _emit_data(nid: int, indent: int, level: int, seen: set[int]) -> None:
         """递归展开数据输入（`--data`）：显示上游节点及其属性值。"""
@@ -374,7 +402,9 @@ def analyze_flow(
             def _orphan_text(n: int) -> str:
                 nd = nodes[str(n)]
                 hint = _node_hint(nd.get("node_type", ""), nd.get("props") or {})
-                return f"#{n} {nd.get('node_type')}" + (f" {hint}" if hint else "")
+                alias = nd.get("alias")
+                name = f"#{n}@{alias}" if alias else f"#{n}"
+                return f"{name} {nd.get('node_type')}" + (f" {hint}" if hint else "")
 
             lines.append("-- orphan exec nodes (no event reaches them): %s" % (
                 ", ".join(_orphan_text(n) for n in orphans),

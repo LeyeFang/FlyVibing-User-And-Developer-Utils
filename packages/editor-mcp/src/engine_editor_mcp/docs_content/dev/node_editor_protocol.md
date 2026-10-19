@@ -25,14 +25,42 @@
 | Agent 参考文档 | `FlyVibing-User-And-Developer-Utils/packages/node-editor/rules.md` | 构图 agent 参考（**按节读取**: get_rules(section=...) / CLI rules; 无参=目录）；含 build_graph Spec 节 |
 | Agent 通道 | `FlyVibing-User-And-Developer-Utils/packages/node-editor/mcp_server.py` + `cli.py` | MCP 4 工具（get_rules(分节) / get_scene_entities / build_graph / apply_graph；`validate_graph` 已移除）; CLI: `python -m flyvibing_node_editor.cli {rules,entities,build,apply}` |
 | 校验器（唯一实现） | `FlyVibing-User-And-Developer-Utils/packages/node-editor/node_graph_validator.py` | L1 规则唯一实现（`check_graph` / `validate_static`）+ L2 干跑委托 `validation.dry_run`；引擎侧 `validation/checks.py` 是薄适配器（`graph_validation_protocol.md`） |
-| 构图器 | `FlyVibing-User-And-Developer-Utils/packages/node-editor/graph_builder.py` | 程序化构图 + `validate()`；节点 helper（siggen_* / pool_* / epoch_* / fbscp_* / cca_* / show_media） |
+| 构图器 | `FlyVibing-User-And-Developer-Utils/packages/node-editor/graph_builder.py` | 程序化构图 + `validate()`；节点 helper（siggen_* / pool_* / epoch_* / fbscp_* / cca_* / show_media / entity_list_* / annotate） |
 
 > 旧路径 `Application/Editor/UI/controllers/node_editor/` 仅保留包级 re-export shim（弃用）；
 > 新代码一律使用上表路径。
 
 ---
 
-## 2. 执行模型（写求值器前必须理解）
+## 2. 画布存档契约（alias / description / node_groups）
+
+`NodeCanvas.to_dict()` / `from_dict()` 是**唯一存档契约**（场景 `node_graph` 字段直接用它）：
+
+- `NodeInstance.alias: str` — 人可读别名（工具链/flow/搜索用，运行时忽略）。
+  空字符串 = 未命名；`to_dict()` **省略空 alias**，旧场景文件保持干净。
+- `NodeInstance.description: str` — 人和 agent 可读的意图/输入输出说明（运行时忽略）。
+  `to_dict()` 省略空描述；GUI 节点卡 **Description** 可展开/收起并直接编辑；
+  `graph.list` 返回、`graph.set_description` 读写（省略参数=读，空串=清除）；
+  离线工具 `set_description` / `add_node.description` 同样支持。
+- `NodeCanvas.node_groups: dict` — 节点组元数据（tools 层宏的记账：`type/alias/params/
+  members/chain_members/arm_members/slots/parent/children`；规范见工具仓 `node_groups.py` + `rules.md`）。
+  引擎**只做不透明保留**，不参与求值；空 dict 不写入 JSON。
+- `clear()` 同时清空组；`replace_from()` 整块复制（导入/切场景不丢组）。
+- `graph.list` 快照：节点带 `alias` / `description`（非空时），顶层带 `node_groups` 摘要
+  （`type/alias/version/arms/members/parent/children/slots`）；`graph.export` 走 `to_dict()`，元数据随图落盘。
+- 编辑器表现层：节点卡标题显示 `@alias`；**Description** 区折叠时显示首行、展开后可直接编辑；
+  `node_groups` 按成员位置画背景框（标题 `@组别名 [类型]`）；工具栏 **Fit** / `graph.fit` 视图适配全部节点。
+- 守卫：`Test/Application/NodeGraph/test_canvas_metadata.py`（alias/description round-trip、空值省略 /
+  clear / replace_from / Scene 存档 / export_graph）+ `Test/Application/Editor/test_live_command_server.py`
+  （`graph.set_description` 读写/清除）+ `node_editor_smoke` 场景（alias + 组框绘制 + Fit）。
+
+> 历史坑（2026-10-18）：`NodeInstance` 与 `NodeCanvas` 曾不保存这两个字段 →
+> 引擎 `graph.export` / 场景保存会把 alias 与 `node_groups` 静默丢掉，
+> 工具侧 `set_group` 随后报 unknown group。新增画布字段必须同步 `to_dict/from_dict`。
+
+---
+
+## 2.1 执行模型（写求值器前必须理解）
 
 - 触发：`GraphEvaluator.trigger(event_type)` 遍历所有 `category == "Event"` 的同名事件节点，
   沿 exec 输出 DFS（`_walk_exec`），同一 trigger 内节点只执行一次。
@@ -40,6 +68,11 @@
   环检测由 `_eval_guard` 保证（每次 trigger 重置）。
 - 每次 trigger 会**清空** `ctx._pin_values`；pin 值作用域 = 单次 trigger。
 - 变量 `ctx.set_var/get_var` 跨 trigger 持久；Timer 用 `ctx.create_timer/get_timer/set_timer`。
+  `SetTimer` 默认 `create_if_missing=true`：timer 名不存在时自动创建（`operate=reset` 为 0，
+  `set_time` 为指定值），不再强制先 `NewTimer`；显式关掉可恢复旧行为。
+- `Compare`：数值 `gt/lt/eq/neq/gte/lte`；布尔 `and/or/not/xor`；成员 `in/not_in`（`out` 为 `not_in` 别名，A=item，B=list，EntityRef 按 eid）；
+  区间 `between`（B ≤ A < C，`include_end=true` 时闭端）。`MakeList` 把已连接的 `Item_0..7`
+  收集为列表（未连接项跳过），作为 `in/not_in` 的 B 源；实体列表也可直接用 `EntityPack`。
 - 有状态节点用 `g.get_state(nid, key, default)` / `g.set_state(nid, key, value)`（如 Delay）。
 - 阻塞语义：节点可设 `_blocked=True` 暂停 exec 链（Delay / TimeTrigger / Branch 手动走分支）。
 - pin 约定：`exec_in` / `exec_out`；多路 exec 用 `out_0..out_N`；数据 pin 用语义名
@@ -49,6 +82,53 @@
   `_read_data_input`，需要原始类型时参考 `evaluators/io.py._read_input_raw` 模式。
 - 事件节点 pin 名为 **`exec`**（不是 exec_in/exec_out）；GraphBuilder 固定事件 ID 161/163/166，
   连线写法 `g.link(GS, "exec", node, "exec_in")`。
+
+### 2.2 实体生命周期与可见性（MI / 复合 cue 必读）
+
+- `EntitySpawn(template=X)`：从 `Scene.entities` 实例化模板 X，并沿 `parent_id` **递归生成全部子孙**；
+  返回 Entity = 根实例。子实体保留模板名，可用 `EntityGet(子名)` 取。
+- `EntitySetRenderVisible`：只写**目标实体自己**的 `MeshRenderer.visible`，**不递归**。
+  只有 Transform 的容器（如 MI 的 `LeftCue`）没有视觉效果。
+- `EntityGroupSetVisible`：对 Entity1-4 各写一次（单批同帧），同样**不递归**；
+  复合 cue 必须把每个带网格的子实体都接进来。
+- `EntityGetTree` / `EntityPack` / `EntityListMerge` 产生 `entity_list`（纯数据）；
+  `EntityListSetVisible` 单批显隐；`EntityListDestroy` 按子树删除。列表只能装运行时
+  `EntityRef`，不能存编辑器场景 id（PIE 会重新分配）。
+- `entity.visible` / `entity.delete` op 统一支持 `scope=one|tree|list`：
+  `one` = 目标本身；`tree` = 目标 + 全部子孙；`list` = `ids` 给定的精确集合。
+  `entity.visible editor` 默认 `tree`，`render` 默认 `one`；多实体 render 走单批命令。
+  `entity.delete scope=one` 默认把子实体重挂到父级（`reparent_children=true`），不产生孤儿。
+- 因此 `cue_n_way` 的 arm 支持 `entity`（单实体兼容）或 `entities: [names...]`
+  （多实体 → 多个 `EntityGet` + `EntityPack/Merge` + `EntityListSetVisible` +
+  `ParallelSend`）；MI 的“箭把+箭头”复合 cue 用后者。
+
+### 2.3 节点组（tools 层宏）
+
+`node_graph.node_groups` 是工具层宏记账，引擎不透明保留、不求值。组在插入时已展开为普通
+`nodes/links`；`slots.entry` / `slots.done` 是内部 pin 的引用，外部用
+`["@alias", "entry"]` / `["@alias", "done"]` 连接。
+
+`cue_window` 是**每帧线性组**：`entry` 每次父链执行都会进入，`done` 是本次求值继续（**每帧**，不是退出事件）；组内用 `TimeGetElapsed(clock)` + `Compare(gte/lt or lte)` + `Compare(and)` 算 active，
+再 `EntityGet(entity)` → `EntitySetRenderVisible(Visible=active)`。窗口外也写 `false`，
+所以组自己负责 enter/exit，不需要外部隐藏；一次性到点事件仍用独立 `TimeTrigger`。参数：`clock`、`start`、`end`、`entity`、
+`visible`、`include_end`。`set_group` 修改参数时重建组内节点，并 remap 外部 entry/done 连线。
+嵌套用 `"parent": "@外层组"` 记录 `parent/children` 元数据；执行关系仍由显式
+`@外层组.done -> @内层组.entry` 连线表达。同一属性只允许一个组写（单写者）。
+
+`hide_group` 是线性组：每个根实体 `EntityGet → EntityGetTree`，多根经
+`EntityListMerge` → `EntityListSetVisible`；参数 `entities`（根名）与 `visible`。
+`mi_select` 是**一次性**线性组：`Random(1..N) → VarSet(mi_var)`，再对每个 arm
+`Compare(mi_code==code)` + 每个实体 `EntityGet → EntitySetRenderVisible`；没有 Branch。
+`entry` 必须接 phase0 起点的一次性事件（如 `TimeTrigger(trial_phase, 0)`），**不能每帧调用**，
+否则 Random 会重抽。注意这里的 `phase` 是 **trial 时间阶段**（0/2/6/10 s），不是 SSSEP
+刺激相位差；刺激相位差由下位机刺激器解释 `sss_code` 后设置，节点图不计算它。
+`phase0_trigger` 线性组计算 `mi_code*mi_scale + sss_code` 并
+`ParallelSend` 一次；`sss_pulse` 线性组每次 entry 发送并行/串行 SSSEP 码、`pulse_count++`、
+重装 `SetTimer`，20 Hz 窗口与 `count<80` 由外层 gate 负责。`sss_pulse` 的 `interval`
+默认是 `-0.0499`（负的重装值）：240 Hz 逻辑线程下正好 12 帧 = 50 ms；`-0.05` 会因浮点边界
+变成 13 帧，4 s 窗口内只能发出约 76 次而不是 80 次。
+`container` 不生成执行节点，只包已有子组：参数 `children`、可选 `entry`/`done`
+（节点 pin 引用）与 `members`；子组 `set_group` 重展开后容器成员自动刷新。
 
 ---
 

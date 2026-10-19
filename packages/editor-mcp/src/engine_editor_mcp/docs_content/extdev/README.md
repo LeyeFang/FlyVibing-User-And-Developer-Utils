@@ -59,4 +59,3 @@
 | 文档 | 内容 |
 |---|---|
 | `extension_dev_protocol.md` | **规范全文**（14 节）：快速上手 / manifest / 生命周期 / ctx 能力 / UI / 节点包 / MCP-CLI 生态 / 线程 / 测试 / 实装地图 / 提交检查单 |
-| （规划）`../Dev/ecosystem_plan.md` | 开发者生态剥离路径（SDK / 发布物化 / 社区仓库） |

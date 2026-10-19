@@ -63,14 +63,17 @@ flowchart LR
 | `sim.state` | `editor_sim_state` | — | 只读（状态机 + PIE 线程存活） | `{state, runtime_alive}` |
 | `view.set_mode` | `editor_switch_2d` / `editor_set_scene_type` | `{"mode": "2d"\|"3d"\|"overlay"}` | **Scene Type 按钮完整语义**：`set_game_type`（决定 PIE 用哪台摄像机）+ 视口切换 | `{mode, label, game_type}` |
 | `view.set_grid` | — | `{"visible": bool}` | **View 菜单 Show Grid 同路径**（`Grid.set_visible`；注销/重注册 overlay，幂等，缺参数报错） | `{visible}` |
+| `ui.panels` | — | `{}` | 列出编辑器面板（内置 + 扩展窗口）及 `visible/kind/ext_id` — panel 发现入口 | `{panels, count, visible}` |
+| `ui.panel` | — | `{"name", "visible"? , "toggle"?}` | 读/写单个面板显隐（等同 View 菜单勾选；省略 visible/toggle = 只读；未知面板 → 受控错误并列出候选） | `{name, visible, changed, kind, ext_id}` |
 | `threads.snapshot` | — | — | **线程注册表快照**（注册/未注册漂移/停滞判定；协议 `threading_protocol.md`，工具 `Utils/Dev/thread_probe.py` 同源） | `{registered, unregistered, stale, count}` |
 | `renderer.snapshot` | — | — | **渲染器状态快照**（后端 / GL 信息 / 资源计数 / 视口 / 帧统计；协议 `rendering_protocol.md`；无头时 `available=false`） | `{available, backend, gl, viewport, counts, overlays, stats}` |
 | `camera.get` | `editor_camera_get` | `{"role": "3d"\|"2d"\|"overlay"}` | 读场景摄像机实体（Transform + Camera） | `{position, rotation, projection, ...}` |
 | `camera.set` | `editor_camera_set` | role + 部分字段（position/rotation/projection/ortho_size/fov/...） | Inspector 改摄像机属性（仅编辑器场景） | 更新后快照 |
-| `graph.list` | `editor_graph_list` | — | 节点图快照（复用 canvas API, 不经 UI） | `{nodes, links}` |
-| `graph.add` | `editor_graph_add` | `{"type", "props"?, "position"?}` | Add 菜单加节点 | `{node_id, type, props}` |
+| `graph.list` | `editor_graph_list` | — | 节点图快照（复用 canvas API, 不经 UI） | `{nodes, links}`（节点带 alias/description） |
+| `graph.add` | `editor_graph_add` | `{"type", "props"?, "description"?, "position"?}` | Add 菜单加节点 | `{node_id, type, props, description}` |
 | `graph.link` | `editor_graph_link` | `{"from": {node,pin}, "to": {node,pin}}` | 画布拖线 | `{link_id}` |
 | `graph.set_props` | `editor_graph_set_props` | `{"node", "props"}` | 内联控件改属性 | `{node_id, props}` |
+| `graph.set_description` | — | `{"node", "description"?}` | 节点卡 Description 编辑区（省略=读；空串=清除） | `{node_id, description}` |
 | `frame.request` | （`editor_capture` 内部） | `{"target": "editor"\|"pie"}` | 请求抓“下一渲染帧”（立即返回） | `{target, generation}` |
 | `frame.fetch` | （`editor_capture` 内部） | `{"target", "generation"}` | 取帧; 就绪时行后跟二进制尾随帧 | `{ready, state, width, height, ..., binary_bytes}` |
 | `editor.quit` | `editor_quit` | — | 点窗口 **X**（GLFW 正常关闭; 无窗口回退 `run_state=False`） | `{closing, via}` |
@@ -97,9 +100,9 @@ flowchart LR
 | `entity.get` | `editor_entity_get` | 读取实体快照（组件/层级/可见性/transform — 角度制） |
 | `entity.add` | `editor_entity_add` | 点 **+ New**（有选中时成为其子级; `parent` 可显式指定/解除; 自动选中新实体） |
 | `entity.rename` | `editor_entity_rename` | Inspector 名称框（不强制唯一; 返回重名警告） |
-| `entity.delete` | `editor_entity_delete` | 点 **Delete**（含子实体; 选中实体已不存在（自身/祖先被删）→ 轮廓/gizmo 级联清理） |
+| `entity.delete` | `editor_entity_delete` | 点 **Delete**（scope: `one`/`tree`/`list`；默认 tree；`one` 默认把子实体重挂到父级；`ids` 可传列表） |
 | `entity.transform` | `editor_entity_transform` | Inspector Transform（编辑器坐标/角度; `local` 本地; `relative` 相对调整=位移加法/旋转加法/缩放乘法; scale 可标量等比） |
-| `entity.visible` | `editor_entity_visible` | 眼图标（editor）+ MeshRenderer.visible（render） |
+| `entity.visible` | `editor_entity_visible` | 眼图标 / MeshRenderer；`scope=one|tree|list`（editor 默认 tree，render 默认 one；list 用 `ids`；多实体 render 单批命令） |
 | `entity.reparent` | `editor_entity_reparent` | 树拖拽建立父子（`"none"` 解除） |
 | `selection.get/set/clear` | `editor_selection_*` | 点击选中 / 清空（`set` 默认带 gizmo — 等同视口点选; 树自动展开到选中项 reveal） |
 | `component.types` | `editor_component_types` | 组件注册表（当前: Camera / MeshRenderer / Transform / Light / MediaPlayer / TextDisplay 等；旧名 DirectionalLight 自动迁移） |
@@ -131,6 +134,7 @@ UI / MCP / 程序三入口共用同一服务实例；L1 规则实现只有一份
 | `graph.validate.cancel` | `editor_graph_validate_cancel` | 取消运行中的任务（帧间生效） |
 | `graph.export` | `editor_graph_export` | 导出画布 JSON（含 `_rules`; `path` 落盘） |
 | `graph.import` | `editor_graph_import` | 导入 JSON 替换画布（`validate_first` 默认拒绝静态 error） |
+| `graph.fit` | — | 视图适配全部节点（节点编辑器工具栏 Fit 同路径；截图前常用） |
 | `project.open` | `editor_project_open` | 打开 .myproj（资源+场景全加载, 启动场景激活） |
 | `project.save` | `editor_project_save` | 保存工程（File ▸ Save Project；`path` 省略=当前路径, 提供=Save As 换根） |
 | `project.export` | `editor_project_export` | 导出工程包（File ▸ Export；`include_player` 默认 true=附游戏层成品含 runtime；false=纯工程包；目标目录须为空或旧导出，`output/` 实验数据保留） |
@@ -150,16 +154,16 @@ UI 入口：Node Editor 工具栏 **Validate** 按钮（静态 / 360 帧 / 600 �
   **纯 socket 客户端，不 import Application**（测试守卫已扩展到包源码）；
   三方工作区：`pip install` wheel（零依赖构建: `python FlyVibing-User-And-Developer-Utils/packages/editor-mcp/build_wheel.py`）→
   `engine-editor-cli setup --workspace <项目>`（拷贝 Skill + 合并 mcp.json, 默认 lite 档）；详见 `FlyVibing-User-And-Developer-Utils/packages/editor-mcp/README.md`。
-- **op 注册表（单一事实源）**：`src/engine_editor_mcp/ops.py`（55 ops: 摘要/参数/分类/旧工具别名; 每 op 含 call_timeout）。
+- **op 注册表（单一 事实源）**：`src/engine_editor_mcp/ops.py`（59 ops: 摘要/参数/分类/旧工具别名;  每 op 含 call_timeout）。
   **扩展 op**（`ext.<id>.*`）为运行期增量注册，不入本静态表 — 发现用 `extension.list`, 调用直接透传
   （见 `Doc/ExtDev/extension_dev_protocol.md` §9）。
   驱动：CLI 命令与帮助、lite MCP 的 engine_help/engine_call、`docgen` 生成 `references/ops.md`；
   完整性由 `Test/Application/Editor/test_editor_mcp_package.py` 对照 `_register_ops` 守卫（新增 op 必须同步）。
 - **MCP 档位**（`--profile lite|full` > env `MGE_MCP_PROFILE` > 默认 full）：
-  - `lite`（推荐; 5 工具 ≈2.3k schema 字符 — 相比 full 44 工具 ≈17.9k 字符约 -87%）:
+  - `lite`（推荐; 5 工具 ≈2.3k schema 字符 — 相比 full 45 工具 ≈17.9k 字符约 -87%）:
     `engine_help`（op 目录/详情, 按需读取）、`engine_call`（单 op; 兼容旧工具名; 大载荷自动瘦身）、
     `engine_batch`（顺序多 op, 省往返）、`engine_validate_graph`（detail=summary 默认）、`engine_capture`（图像直回）；
-  - `full`：v1–v4 全部 44 个 `editor_*` 工具（向后兼容, 行为不变）—— lite 工具不注册；
+  - `full`：v1–v4 全部 45 个 `editor_*` 工具（向后兼容, 行为不变）—— lite 工具不注册；
   - 工具集裁剪在 `server.py::apply_profile`（幂等; 内部结构不可用时 fail-open）。
 - **CLI**（`engine-editor-cli`, 零常驻上下文成本 — 终端型 agent 首选）：
   `ops` / `help` / `call <op> k=v...` / `batch` / `exec <script.py>`（注入 `engine` 客户端, 脚本内过滤输出）/
@@ -240,7 +244,7 @@ UI 入口：Node Editor 工具栏 **Validate** 按钮（静态 / 360 帧 / 600 �
 
 ## 9. 路线（后续阶段）
 
-- **agent 通道 v0.4.0（2026-10-05 落地）**：MCP 双档位（lite 5 工具 / full 44 工具）+ CLI
+- **agent 通道 v0.4.0（2026-10-05 落地）**：MCP 双档位（lite 5 工具 / full 45 工具）+ CLI
   （ops/help/call/batch/exec/validate/capture/setup）+ Skill（渐进披露）+ op 注册表/文档生成 —— 见 §5/§6。
 - ~~阶段 2~~（2026-09-28 大部分落地）：`sim.stop` ✅、图编辑 ops（`graph.add/link/set_props` + `graph.list` ✅；
   `graph.remove` 未做）、`view.screenshot` ✅（`frame.request/fetch` + `editor_capture`，PNG 在 MCP 进程）；

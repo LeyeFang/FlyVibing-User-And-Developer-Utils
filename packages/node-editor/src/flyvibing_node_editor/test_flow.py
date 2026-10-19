@@ -94,6 +94,26 @@ def test_synthetic() -> None:
     check("未知事件 → ok=False", r3["ok"] is False)
 
 
+def test_timer_warning() -> None:
+    print("-- SetTimer lazy creation --")
+
+    def _graph(**props):
+        g = GraphBuilder()
+        _gs, fu, _gp = g.event_nodes()
+        st = g.node("SetTimer", ["exec_in", "exec_out", "Value"],
+                    {"operate": "reset", "timer_name": "phase", "value": 0, **props})
+        g.link(fu, "exec", st, "exec_in")
+        return g.build()
+
+    r = analyze_flow(_graph(), event="OnFrameUpdate")
+    text = "\n".join(r["lines"])
+    check("SetTimer 默认惰性创建: 无 [NO TIMER]", "[NO TIMER]" not in text, text)
+
+    r2 = analyze_flow(_graph(create_if_missing=False), event="OnFrameUpdate")
+    text2 = "\n".join(r2["lines"])
+    check("显式关闭惰性创建 + 无 NewTimer: 警告", "[NO TIMER]" in text2, text2)
+
+
 def test_real_scene() -> None:
     scene = os.environ.get("MGE_MI_SCENE", "")
     if not scene or not os.path.isfile(scene):
@@ -118,6 +138,7 @@ def main() -> int:
     if not _ROOT:
         print("  ! engine root not found — set MGE_ROOT")
     test_synthetic()
+    test_timer_warning()
     test_real_scene()
     print("-" * 60)
     total = _RESULTS["pass"] + _RESULTS["fail"]

@@ -113,8 +113,8 @@ load_scene_from_file` 以及 `ProjectManager._load_all_scenes` 都必须维护 `
 - **重复导出 = 干净重建**（2026-09-28）：目标为旧导出时先清空其内容再重建（防止旧场景名/旧轮子/旧引擎文件残留）；仅**保留 `output/`**（实验数据）；
 - 目标路径与当前工程目录**完全相等**时拒绝（防止覆盖 live .myproj）；
 - 缺失资源 → 记 warnings 并**从包中剔除**（引用它的场景保留旧 id，打开时同现状告警）；
-- 同名文件批内去重（`_2` 后缀）；返回摘要 dict（dir/project/scenes/assets/bytes/warnings）。
-
+- 同名文件批内去重（`_2` 后缀）；返回摘要 dict（dir/project/scenes/assets/bytes/warnings）。- **扩展 opt-out**：导出游戏层时扫描 `Application/Functions/**/extension.json`，`export:false` 的扩展目录整棵跳过（本地夹具/私有后端），路径记入 manifest `export_excluded`；默认 `true` 保持官方扩展行为；
+- **第三方声明**：根目录 `THIRD_PARTY_NOTICES.md` 复制到导出包根目录并列入 manifest `files`；
 ---
 
 ## 5. 开发清单（新增/修改工程与导出行为时）

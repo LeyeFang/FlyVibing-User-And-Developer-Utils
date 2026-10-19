@@ -1,7 +1,6 @@
-# ExtensionKit — 扩展开发者工具集（SDK 雏形）
+# ExtensionKit — 扩展开发者工具集
 
-> 定位：`Doc/Dev/ecosystem_plan.md` **L0 发布物化**的组成部分 — 未来并入 SDK 包。
-> 当前内容：静态审查器（无需引擎运行，零依赖）。
+> 提供静态审查器与无头 ImGui 测试入口，无需引擎运行，零依赖。
 
 ## review_extension.py — 静态审查器 v0
 

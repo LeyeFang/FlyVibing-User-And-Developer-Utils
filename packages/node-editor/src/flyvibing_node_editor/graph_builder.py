@@ -81,6 +81,15 @@ class GraphBuilder:
             "to_pin": self._nodes[str(to)]["pin_ids"][tp],
         }
 
+    def annotate(self, nid: int, alias: str = "", description: str = "") -> int:
+        """给节点写持久别名 / 描述（空串 = 不修改）。返回节点 id。"""
+        nd = self._nodes[str(nid)]
+        if alias:
+            nd["alias"] = alias
+        if description:
+            nd["description"] = description
+        return nid
+
     def chain(self, *node_ids: int) -> None:
         """exec_out → exec_in 串联。"""
         for i in range(len(node_ids) - 1):
@@ -109,7 +118,8 @@ class GraphBuilder:
                        {"mode": "manual", "timer_name": name})
         st = self.node("SetTimer", ["exec_in", "exec_out", "Value"],
                        {"operate": "set_time", "mode": "manual",
-                        "timer_name": name, "value": start_value})
+                        "timer_name": name, "value": start_value,
+                        "create_if_missing": False})
         self.chain(nt, st)
         return nt, st
 
@@ -118,7 +128,7 @@ class GraphBuilder:
         tts = []
         for t in times:
             tt = self.node("TimeTrigger",
-                           ["exec_in", "exec_out", "Time", "Elapsed",
+                           ["exec_in", "Time", "Elapsed",
                             "out_0", "out_1", "out_2", "out_3",
                             "out_4", "out_5", "out_6", "out_7"],
                            {"mode": "manual", "time": t, "timer": timer_name})
@@ -193,6 +203,70 @@ class GraphBuilder:
         """显示一组实体。返回 (entry_id, exit_id)。"""
         return self.hide(*entity_names, value=1.0)
 
+    # ── 实体列表 (entity_list) — Entity ▸ List ──────────────
+    # 列表是纯数据流：EntityRef 只能在运行时获得（EntityGet / EntityGetTree），
+    # 不能存编辑器场景 id（PIE 会重新分配）。
+
+    def entity_get_tree(self, entity_name: str, with_entry: bool = False):
+        """EntityGet(name) → EntityGetTree。返回树节点 id（输出 Entities / Count）。
+
+        with_entry=True 时返回 (EntityGet id, 树节点 id) — 需要 exec 串链时用。
+        """
+        eg = self.node("EntityGet", ["exec_in", "exec_out", "Name", "Entity"],
+                       {"entity_name": entity_name})
+        gt = self.node("EntityGetTree", ["Entity", "Entities", "Count"])
+        self.link(eg, "Entity", gt, "Entity")
+        return (eg, gt) if with_entry else gt
+
+    def entity_pack(self, *entity_names: str) -> int:
+        """把若干实体打包成 entity_list。返回输出节点 id（Entities / Count）。
+
+        ≤4 个实体 = 单个 EntityPack；更多时按 4 个一组 Pack 后 EntityListMerge。
+        """
+        if not entity_names:
+            raise ValueError("entity_pack 至少需要一个实体名")
+        chunks: list[int] = []
+        for start in range(0, len(entity_names), 4):
+            chunk = entity_names[start:start + 4]
+            gets = [self.node("EntityGet", ["exec_in", "exec_out", "Name", "Entity"],
+                              {"entity_name": en}) for en in chunk]
+            pk = self.node("EntityPack", [
+                "Entity1", "Entity2", "Entity3", "Entity4", "Entities", "Count",
+            ])
+            for i, eg in enumerate(gets):
+                self.link(eg, "Entity", pk, f"Entity{i + 1}")
+            chunks.append(pk)
+        out = chunks[0]
+        for nxt in chunks[1:]:
+            out = self.entity_list_merge((out, "Entities"), (nxt, "Entities"))
+        return out
+
+    def entity_list_merge(self, a_src: tuple[int, str],
+                          b_src: tuple[int, str]) -> int:
+        """EntityListMerge。返回合并节点 id（Entities / Count）。"""
+        mg = self.node("EntityListMerge",
+                       ["A", "B", "Entities", "Count"])
+        self.link(a_src[0], a_src[1], mg, "A")
+        self.link(b_src[0], b_src[1], mg, "B")
+        return mg
+
+    def entity_list_set_visible(self, entities_src: tuple[int, str],
+                                value: float = 1.0) -> int:
+        """EntityListSetVisible (单批显隐)。返回节点 id (exec_in/exec_out)。"""
+        lv = self.node("EntityListSetVisible",
+                       ["exec_in", "Entities", "Visible", "exec_out"])
+        c0 = self.constant(value)
+        self.link(entities_src[0], entities_src[1], lv, "Entities")
+        self.link(c0, "Result", lv, "Visible")
+        return lv
+
+    def entity_list_destroy(self, entities_src: tuple[int, str]) -> int:
+        """EntityListDestroy (子树语义删除)。返回节点 id。"""
+        ld = self.node("EntityListDestroy",
+                       ["exec_in", "Entities", "exec_out"])
+        self.link(entities_src[0], entities_src[1], ld, "Entities")
+        return ld
+
     def var_set(self, name: str, value: float, mode: str = "manual") -> int:
         """VarSet (manual 模式)。"""
         return self.node("VarSet", ["exec_in", "exec_out", "Name", "Value"],
@@ -223,8 +297,11 @@ class GraphBuilder:
         return br
 
     def compare(self, operand: str) -> int:
-        """Compare 节点。"""
-        return self.node("Compare", ["A", "B", "Result"], {"operation": operand})
+        """Compare 节点。between 自动带可选 C 引脚。"""
+        pins = ["A", "B", "Result"]
+        if operand == "between":
+            pins.insert(2, "C")
+        return self.node("Compare", pins, {"operation": operand})
 
     def constant(self, value: float) -> int:
         """Constant 节点。"""
