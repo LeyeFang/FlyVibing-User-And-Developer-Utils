@@ -29,6 +29,8 @@
 2. **建工作区**：例如 `D:\Experiments\MyParadigm`，用 VS Code 打开它。
 3. **确认引擎能启动**：开始菜单 → FlyVibingEngine，看到编辑器窗口（状态栏/控制台出现
    `Editor command server on 127.0.0.1:8977` 就是就绪）。
+   也可以让 CLI 直接启动并握手：`engine-editor-cli launch --port auto --language zh`
+   （多 agent 时每个 agent 用自己的端口；`engine-editor-cli engines` 可查看）。
 
 ## 2. 把工具链接进你的工作区（三选一）
 
@@ -99,7 +101,7 @@ D:\Experiments\MyParadigm\
 | `engine-editor-cli` 找不到命令 | 没装 wheel：`pip install flyvibing-editor-mcp`（或把 `packages/editor-mcp` 的 wheel 装上） |
 | agent 不认得这些命令 | skill 没进工作区：跑一次 `engine-editor-cli setup --workspace <你的工作区>` |
 | 导出的成品在别的机器打不开设备 | 那台机器没绑定逻辑设备名（见 §5） |
-| 端口 8977 被占 | 设 `FVE_EDITOR_MCP_PORT=<别的端口>`，重启引擎与客户端 |
+| 端口 8977 被占 | 用 Settings ▸ Common ▸ Port，或 `engine-editor-cli launch --port auto`；手动时设 `MGE_EDITOR_MCP_PORT=<别的端口>`，重启引擎与客户端 |
 
 ## 7. 想改引擎/写扩展？
 

@@ -1172,7 +1172,7 @@ def _phase0_trigger_ops(prefix: str, cfg: dict) -> list[dict]:
         {"op": "add_node", "type": "Constant", "props": {"value": cfg["mi_scale"]},
          "as": f"{prefix}_scale", "description": "MI bit shift scale."},
         {"op": "add_node", "type": "ScalarMath",
-         "props": {"operation": "mul"}, "as": f"{prefix}_mul",
+         "props": {"operation": "multiply"}, "as": f"{prefix}_mul",
          "description": "mi_code * 32."},
         {"op": "add_node", "type": "ScalarMath",
          "props": {"operation": "sum"}, "as": f"{prefix}_sum",

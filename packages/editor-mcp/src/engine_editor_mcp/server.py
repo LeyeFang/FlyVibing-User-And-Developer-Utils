@@ -1,14 +1,15 @@
 """
-Engine Editor Live MCP — 运行中编辑器的热注入工具（v0.4.0: 双档位 + CLI/Skill 混合形态）。
+Engine Editor Live MCP — 运行中编辑器的热注入工具（v0.5.0: 双档位 + CLI/Skill + 自动启动/端口协商）。
 
 档位（--profile lite|full > env MGE_MCP_PROFILE > 默认 full）:
-  lite（推荐, 省 token — 5 个工具）:
+  lite（推荐, 省 token — 6 个工具）:
     engine_help(op|topic)        → op 目录 / 单 op 详情 / 主题帮助（按需读取, 不常驻）
     engine_call(op, args)        → 执行 1 个 op（兼容旧工具名; 大载荷自动瘦身）
     engine_batch(calls)          → 一次调用顺序执行多个 op
     engine_validate_graph(...)   → 图干跑校验（detail=summary 默认）
     engine_capture(target)       → 抓帧（图像直回; 想省 token 用 CLI capture）
-  full（兼容旧用法 — 45 个 editor_* 工具, 见下）:
+    engine_launch(...)           → 启动引擎 + 自动端口握手（MCP 进程随后使用该端口）
+  full（兼容旧用法 — 45 个 editor_* 工具 + engine_launch, 见下）:
     editor_run_pie / editor_stop_pie / editor_sim_state  → PIE 启停与状态
     editor_switch_2d / editor_set_scene_type             → 场景类型按钮语义（影响 PIE 摄像机）
     editor_camera_get / editor_camera_set                → 场景摄像机读写（3d / 2d / overlay）
@@ -36,6 +37,7 @@ dev 仓库内等价入口: python Utils\\ExtDev\\EditorMcp\\mcp_server.py （薄
 """
 
 import io
+import json
 import os
 import sys
 
@@ -72,7 +74,7 @@ __all__ = [
     "main",
 ]
 
-mcp = FastMCP("Engine Editor Live", version="0.4.0")
+mcp = FastMCP("Engine Editor Live", version="0.5.0")
 
 # ── 低层函数（v0.4.0 起实现位于 client.py; 此处保留模块级名以兼容 shim / E2E 脚本）──
 
@@ -634,9 +636,9 @@ def editor_quit() -> dict:
 
 
 # ════════════════════════════════════════════════════════════════
-# v0.4.0: 档位（profile）— lite 精简工具集 / full 兼容旧工具集
+# v0.5.0: 档位（profile）— lite 精简工具集 / full 兼容旧工具集
 #   选择: 启动参数 --profile lite|full > env MGE_MCP_PROFILE > 默认 full
-#   lite 目标: 44×schema（约 17.8k 字符常驻）→ 5×schema（约 1.2k 字符）;
+#   lite 目标: 旧 45×schema（约 17.9k 字符常驻）→ 6×schema（约 3.3k 字符）;
 #   完整 op 参考按需获取（engine_help / CLI / Skill），不再常驻上下文。
 # ════════════════════════════════════════════════════════════════
 
@@ -647,7 +649,10 @@ LITE_TOOL_NAMES = (
     "engine_batch",
     "engine_validate_graph",
     "engine_capture",
+    "engine_launch",
 )
+# 同时保留在 full 档的新工具（full 只排除 lite 专属工具，不排除共享工具）
+_SHARED_TOOL_NAMES = ("engine_launch",)
 
 _HELP_TOPICS = op_registry.TOPIC_HELP  # 主题帮助的单一事实源位于 ops.py（CLI 同用）
 
@@ -671,7 +676,7 @@ def _requested_profile(argv: list[str] | None = None) -> str:
 def apply_profile(profile: str) -> str:
     """按档位裁剪工具集（幂等 — 可在任意当前档切到另一档; 返回实际档位）。
 
-    lite → 仅保留 LITE_TOOL_NAMES; full → 移除 lite 工具（恢复旧 45 工具集）。
+    lite → 仅保留 LITE_TOOL_NAMES; full → 移除 lite 专属工具（保留旧 45 工具集 + 共享 engine_launch）。
     内部结构不可用时 fail-open（保留全部并告警）。
     """
     profile = "lite" if str(profile).strip().lower() == "lite" else "full"
@@ -693,7 +698,8 @@ def apply_profile(profile: str) -> str:
     if profile == "lite":
         tools.update({n: t for n, t in _ALL_TOOL_OBJECTS.items() if n in LITE_TOOL_NAMES})
     else:
-        tools.update({n: t for n, t in _ALL_TOOL_OBJECTS.items() if n not in LITE_TOOL_NAMES})
+        tools.update({n: t for n, t in _ALL_TOOL_OBJECTS.items()
+                      if n not in LITE_TOOL_NAMES or n in _SHARED_TOOL_NAMES})
     return profile
 
 
@@ -771,6 +777,38 @@ def engine_capture(target: str = "editor", timeout_s: float = 6.0):
     return [Image(data=png_bytes, format="png"), f"saved: {path}"]
 
 
+@mcp.tool()
+def engine_launch(
+    engine_root: str | None = None,
+    port: str | int = "auto",
+    language: str | None = None,
+    settings: dict | None = None,
+    timeout_s: float = 30.0,
+) -> dict:
+    """启动一个编辑器实例并等待命令总线就绪（多引擎/多 agent 自动端口协商）。
+
+    Args:
+        engine_root: 引擎根目录（省略 → env MGE_ENGINE_ROOT 或当前目录向上查找）
+        port: "auto"（默认，8977..9076 首个空闲）或固定端口
+        language: "en" / "zh"（省略用 Settings 当前值）
+        settings: 与 Settings 面板同键的覆盖，如 {"ui.font_scale": 1.15}
+        timeout_s: 等待就绪秒数
+
+    成功后本 MCP 进程的后续 engine_call/batch/capture 自动使用返回的 port。
+    """
+    from .launcher import LaunchError, launch_engine
+    try:
+        result = launch_engine(engine_root, port, language, settings, timeout_s)
+    except LaunchError as e:
+        try:
+            payload = json.loads(str(e))
+        except ValueError:
+            payload = {"ok": False, "error": str(e)}
+        return payload
+    os.environ["MGE_EDITOR_MCP_PORT"] = str(result["port"])
+    return result
+
+
 # 全量工具主表（apply_profile 的单一数据源 — 在所有 @mcp.tool() 定义之后固化）
 try:
     _ALL_TOOL_OBJECTS: dict = dict(mcp._tool_manager._tools)
@@ -778,8 +816,31 @@ except AttributeError:
     _ALL_TOOL_OBJECTS = {}
 
 
+def _requested_port(argv: list[str] | None = None) -> int | None:
+    """MCP 启动参数 --port（优先于 env / 默认 8977）; 无则 None。"""
+    args = list(sys.argv[1:] if argv is None else argv)
+    value = ""
+    for i, a in enumerate(args):
+        if a == "--port" and i + 1 < len(args):
+            value = args[i + 1]
+            break
+        if a.startswith("--port="):
+            value = a.split("=", 1)[1]
+            break
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        print(f"[engine-editor-mcp] WARNING: invalid --port {value!r}; using env/default", file=sys.stderr)
+        return None
+
+
 def main() -> None:
-    """入口: 解析档位 → 裁剪工具集 → 清空抓帧目录 → 启动 stdio 服务器。"""
+    """入口: 解析端口/档位 → 裁剪工具集 → 清空抓帧目录 → 启动 stdio 服务器。"""
+    port = _requested_port()
+    if port is not None:
+        os.environ["MGE_EDITOR_MCP_PORT"] = str(port)
     apply_profile(_requested_profile())
     _wipe_frames_dir()
     mcp.run()

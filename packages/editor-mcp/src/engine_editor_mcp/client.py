@@ -50,17 +50,19 @@ def editor_port() -> int:
         return DEFAULT_PORT
 
 
-def send_raw(op: str, args: dict | None = None, timeout: float = 15.0) -> tuple[dict, bytes | None]:
+def send_raw(op: str, args: dict | None = None, timeout: float = 15.0,
+             port: int | None = None) -> tuple[dict, bytes | None]:
     """向编辑器发送一条命令并等待回执; 就绪帧随二进制尾随负载返回。
 
+    port=None → 环境变量/默认端口; 指定 port 时用于多引擎/启动握手。
     Returns:
         (result_or_error, payload) — 失败时 result 含 "error" 键、payload 为 None。
     """
     _next_id[0] += 1
     req = {"id": _next_id[0], "op": op, "args": args or {}}
-    port = editor_port()
+    target_port = editor_port() if port is None else int(port)
     try:
-        with socket.create_connection(("127.0.0.1", port), timeout=timeout) as conn:
+        with socket.create_connection(("127.0.0.1", target_port), timeout=timeout) as conn:
             conn.sendall((json.dumps(req, ensure_ascii=False) + "\n").encode("utf-8"))
             reader = conn.makefile("rb")
             line = reader.readline()
@@ -78,7 +80,7 @@ def send_raw(op: str, args: dict | None = None, timeout: float = 15.0) -> tuple[
                     return {"error": f"二进制负载不完整（{len(payload or b'')}/{n} bytes）"}, None
             return result, payload
     except ConnectionRefusedError:
-        return {"error": f"编辑器未运行（127.0.0.1:{port} 无监听）— 请先启动 startup.bat。"}, None
+        return {"error": f"编辑器未运行（127.0.0.1:{target_port} 无监听）— 请先启动 startup.bat。"}, None
     except (socket.timeout, TimeoutError):
         return {"error": f"等待编辑器响应超时（{timeout}s）— 编辑器可能未在处理帧。"}, None
     except ValueError as e:
@@ -87,9 +89,10 @@ def send_raw(op: str, args: dict | None = None, timeout: float = 15.0) -> tuple[
         return {"error": f"连接失败: {e}"}, None
 
 
-def send(op: str, args: dict | None = None, timeout: float = 15.0) -> dict:
+def send(op: str, args: dict | None = None, timeout: float = 15.0,
+         port: int | None = None) -> dict:
     """薄包装（非图像场景）— 保持 v1 工具的 dict 返回契约。"""
-    result, _payload = send_raw(op, args, timeout)
+    result, _payload = send_raw(op, args, timeout, port=port)
     return result
 
 
@@ -167,8 +170,9 @@ class EngineClient:
         path = eng.capture("editor")       # 抓帧 → PNG 路径
     """
 
-    def __init__(self, timeout: float = 15.0) -> None:
+    def __init__(self, timeout: float = 15.0, port: int | None = None) -> None:
         self.timeout = float(timeout)
+        self.port = port
 
     def try_send(self, op: str, **args: Any) -> dict:
         """发送 op；永不 raise — 失败返回 {"error": "..."}。
@@ -178,7 +182,7 @@ class EngineClient:
         """
         from . import ops as op_registry
         timeout = max(self.timeout, op_registry.call_timeout(op))
-        result, _payload = send_raw(op, args or None, timeout)
+        result, _payload = send_raw(op, args or None, timeout, port=self.port)
         return result
 
     def ok(self, op: str, **args: Any) -> dict:

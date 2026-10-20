@@ -111,9 +111,42 @@ engine_call(op="entity.add", args={"name": "MCP_Cue"})
 engine_batch(calls=[{"op": "entity.add", "args": {"name": "A"}}, {"op": "sim.play"}])
 engine_validate_graph(source="canvas", detail="summary")
 engine_capture(target="pie")                   # 图像直回（需要看画面时）
+engine_launch(engine_root="C:/path/to/MyGameEngine-Python", port="auto", language="zh",
+              settings={"ui.font_scale": 1.15})  # 启动 + 自动端口；后续调用自动使用该端口
 ```
 
 旧工具名兼容：`engine_call(op="editor_run_pie")` ≡ `sim.play`（别名表见 ops.py）。
+
+### 6.2 扩展节点与“节点池”（不连线）
+
+```powershell
+engine-editor-cli call graph.types owner=device          # 看扩展 node_pack 的 type/pins/fields
+engine-editor-cli call graph.types category=Algorithm    # 看 BCI 节点
+engine-editor-cli call graph.add --json @args.json       # {"type":"SerialSend","props":{...}}
+engine-editor-cli call graph.list                        # 未连线节点也在画布/节点池中
+```
+
+`graph.add` 只创建节点，不要求 `graph.link`；适合外部 agent 先批量摆节点、再逐步接线。
+扩展节点必须由已发现的 `node_pack.py` 注册；未安装 pack 时该类型不可添加（会提示 `graph.types`）。
+
+### 6.1 多引擎 / 多 agent（端口互不串话）
+
+```powershell
+# agent A
+engine-editor-cli launch --port auto --language zh --set ui.font_scale=1.15
+# -> {"ok": true, "port": 8977, ...}
+engine-editor-cli --port 8977 call sim.state
+
+# agent B（同时运行；自动拿到 8978）
+engine-editor-cli launch --port auto --language en
+engine-editor-cli --port 8978 call sim.state
+
+engine-editor-cli engines   # 核对所有活动实例
+```
+
+- 每个 agent 必须记住自己的 `port`；CLI 用全局 `--port N`，MCP 用 `engine_launch` 的返回值（进程内自动记住）。
+- 不要复用默认 8977 同时操作两个实例；否则会出现“另一个窗口在动”的串话。
+- Settings 面板的 Port 只决定**手动启动**的默认端口；`--port` / `MGE_EDITOR_MCP_PORT` 优先。
 
 ## 7. 脚本模式模板（扫描 + 过滤输出）
 

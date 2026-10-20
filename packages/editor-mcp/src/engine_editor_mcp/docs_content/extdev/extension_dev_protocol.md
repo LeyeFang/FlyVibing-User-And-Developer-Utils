@@ -132,9 +132,9 @@ rescan:  已装载者全部 unload 后重新扫描（Extensions 菜单 ▸ Resca
 | `ctx.extension_dir` / `ctx.data_dir` / `ctx.engine_root` | ✅ M0 | 只读资产目录 / 可写数据目录 / 引擎根 |
 | `ctx.log(msg)` | ✅ M0 | `[ext:<id>]` 前缀日志（Console 通道 M1） |
 | `ctx.ops.register(name, fn, summary="")` | ✅ M0 | **扩展 op**（§9 生态核心） |
-| `ctx.ui.register_window(name, draw_fn, visible=True, flags=None, close_policy="hide")` | ✅ M1 (2026-10-11) | 注册独立窗口（唯一入口 `ExtensionUI`；重名冲突/异常隔离/purge/窗口生命周期完备性 见 §7） |
+| `ctx.ui.register_window(name, draw_fn, visible=False, flags=None, close_policy="hide")` | ✅ M1 (2026-10-11) | 注册独立窗口（唯一入口 `ExtensionUI`；重名冲突/异常隔离/purge/窗口生命周期完备性 见 §7；默认不抢焦点，enable 时 `show_all` 统一打开） |
 | `ctx.ui.register_command / post / kit` | `[M1 待]` | 命令 / 帧安全点 / 控件包（设计见 `extension_protocol.md` §5.1） |
-| `ctx.nodes.register_pack(...)` | `[M1]` | 节点包（§8 设计） |
+| `ctx.nodes.register_pack(...)` | ✅ M1 (2026-10-20) | 节点包（声明 + evaluator + 控件字段；§8） |
 | `ctx.settings(schema)` | `[M1]` | schema 化设置（自动 UI + 持久化）；落地后**页面注册进 Settings 面板**（与 `Common`/`Export` 同级 — 宿主侧已就绪: `SettingsPanel.register_page` / `unregister_pages_by_owner`，见 `Doc/Dev/ui_protocol.md` §13） |
 | `ctx.threads / ctx.jobs / ctx.bus` | `[M2]` | 受管线程 / 后台任务 / 数据总线 |
 | `ctx.ui.post(fn)` | `[M1]` | 后台线程 → 渲染线程帧安全点 |
@@ -286,20 +286,36 @@ watch / record 分离、实时示波器（min/max 包络 + 悬停读数）、显
 采集落盘、`ext.virtual.*` **九件套** ops、设置持久化与 `close_policy="disable"` 收尾;
 **厂商复制指南**见其 README — 设备族面板扩展的起手模板）。
 
-## 8. 节点包规范（`[M1]` 设计）
+## 8. 节点包规范（✅ M1 实装 2026-10-20）
 
-开发者只提交**声明**，ExtensionManager 翻译到引擎既有五注册点（`node_editor_protocol.md`）：
+扩展在 `node_pack.py` 返回声明 dict（或用 `ctx.nodes.register_pack(pack)` 运行期注册）。
+内置 `Application/Functions/**/node_pack.py` 由 NodeGraph **自动发现**，不需要扩展 enable；
+type 名作为图的持久身份，官方迁移保留旧名（如 `SerialSend`），新扩展建议 `ext.<id>.<Type>`。
 
-| 声明 | 落位 |
-|---|---|
-| 节点类型（label/引脚/props） | `Core/NodeGraph/node_types` 动态注册（type 名 `ext.<id>.<Type>`） |
-| 求值器回调 | `register_evaluator`（扩展目录内的纯函数; 干跑必须确定性） |
-| 卡片控件 | widgets 注册表（key 加扩展前缀） |
-| 引脚可见性 | `visible_pins` 规则 |
-| Add 菜单 | `MENU_SECTIONS` 新增顶级页 = 扩展 name; 页内可分组 |
+```python
+def register() -> dict:
+    return {
+        "id": "myext", "owner": "myext", "name": "My Extension",
+        "nodes": [{
+            "type": "ext.myext.MyNode", "label": "My Node", "category": "MyExt",
+            "color": (0.5, 0.7, 0.9),
+            "pins": [{"name": "exec_in", "kind": "exec", "direction": "input"}],
+            "fields": [{"key": "gain", "label": "Gain", "kind": "float", "default": 1.0}],
+            "evaluator": my_eval,       # 可选；纯函数 (node_id, ctx, graph)
+        }],
+        "menu": [("My Extension", [("My Node", "ext.myext.MyNode")])],
+    }
+```
 
-红线：不得覆盖内置 type 名（除非 manifest 显式 override 且接受警告）; 未安装扩展的图加载 →
-占位提示 "missing extension"（M3）。
+规则：
+- 不得覆盖其他 owner 的 type（`NodePackError`）；同 owner 重复注册幂等；
+- `fields` 由 Node Editor 通用控件渲染（text/int/float/bool/enum/serial_port），
+  扩展无需 import Editor / imgui；
+- evaluator 必须是确定性纯函数（干跑也走它）；未安装 pack 的图应显示 missing extension（M3）；
+- **Agent 发现**: `graph.types`（含 type/label/category/owner/pins），`extension.list` 也返回
+  `extensions[].nodes`；`graph.add` 可直接添加未连线节点（节点池）并返回 pins。
+- 内置 pack 在扩展 disable 后仍保留（节点类型属于图可加载性）；运行期 `ctx.nodes` 注册的 pack
+  在 unload 时反注册。
 
 ## 9. MCP/CLI 服务规范（增量扫描生态 — 本协议的生态核心）
 
@@ -321,7 +337,8 @@ watch / record 分离、实时示波器（min/max 包络 + 悬停读数）、显
 
 | 动作 | 通道 |
 |---|---|
-| 发现 | `extension.list`（==菜单列表）→ `extensions[].ops` + `extension_ops{}`（owner/summary） |
+| 发现 | `extension.list`（==菜单列表）→ `extensions[].ops` + `extensions[].nodes` + `extension_ops{}`（owner/summary） |
+| 节点类型 | `graph.types`（含扩展 pack）→ type/label/category/owner/pins/fields |
 | 启停 | `extension.enable / extension.disable`（等同菜单勾选; 持久化） |
 | 调用 | 任意通道直接发 `ext.<id>.<op>`: CLI `call`（ext.* 透传, 无需静态注册）/ `engine_call` / exec `engine.ok` |
 | 文档 | 扩展 op 的 summary 在 `extension.list` 中; 富有文档的扩展建议带 README 路径 |

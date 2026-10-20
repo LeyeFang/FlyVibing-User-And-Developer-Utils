@@ -334,15 +334,24 @@
 
 ### `graph.list`
 
-节点图快照（nodes: id/type/alias/description/props/pins; links）
+节点图快照（nodes: id/type/owner/alias/description/props/pins; links）
 
 - 示例: `engine-editor-cli call graph.list`
 
+### `graph.types`
+
+发现可用节点类型（含扩展 node_pack）: type/label/category/owner/pins
+
+- `owner` (str, 可选) — 只看某个扩展，如 device
+- `category` (str, 可选) — 只看某个分类
+
+- 示例: `engine-editor-cli call graph.types owner=VALUE category=VALUE`
+
 ### `graph.add`
 
-添加节点（等同 Add 菜单）
+添加节点（等同 Add 菜单；不要求连线，可先建节点池）
 
-- `type` (str, 必填) — 节点类型名，如 EntitySpawn
+- `type` (str, 必填) — 节点类型名，如 EntitySpawn / graph.types 查询
 - `props` (json, 可选) — 节点属性 dict
 - `description` (str, 可选) — 节点描述（agent/新手可读）
 - `position` (json, 可选) — [x,y] 画布位置

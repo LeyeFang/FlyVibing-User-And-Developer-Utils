@@ -15,8 +15,7 @@
 | 层 | 文件 | 说明 |
 |---|---|---|
 | 数据模型 | `Application/Core/NodeGraph/data_model.py` | `PinDef` / `NodeTypeDef` / `NodeInstance` / `LinkInstance`（无 imgui 依赖） |
-| 类型注册表 | `Application/Core/NodeGraph/node_types/*.py` | 每文件一类；`_reg()` 注册进 `_TYPES`；颜色常量在 `node_types/__init__.py` |
-| 执行引擎 | `Application/Core/NodeGraph/evaluator_engine.py` | `ExecutionContext`（pin/var/timer/dry_run/**宿主注入**）、`GraphEvaluator`（exec 遍历 + 懒求值）、`_EVALUATORS` 注册表 |
+| 类型注册表 | `Application/Core/NodeGraph/node_types/*.py` | 每文件一类；`_reg()` 注册进 `_TYPES`；颜色常量在 `node_types/__init__.py` || 扩展节点包 | `Application/Core/NodeGraph/node_packs.py` + `Application/Functions/**/node_pack.py` | 自动发现/运行期注册；type/menu/evaluator/fields 增量注册 || 执行引擎 | `Application/Core/NodeGraph/evaluator_engine.py` | `ExecutionContext`（pin/var/timer/dry_run/**宿主注入**）、`GraphEvaluator`（exec 遍历 + 懒求值）、`_EVALUATORS` 注册表 |
 | 求值器 | `Application/Core/NodeGraph/evaluators/*.py` | 每文件一域；`register_evaluator()`；导入触发在 `Application/Core/NodeGraph/__init__.py` |
 | 画布 | `Application/Core/NodeGraph/canvas.py` | `NodeCanvas`：节点/连线 CRUD、`pin_ids` 实例化、序列化（**存档契约**） |
 | 图约束 | `Application/Core/NodeGraph/graph_constraints.py` | 跨节点联动（删除级联 + 静态校验函数）；纯数据、无 imgui |
@@ -152,6 +151,31 @@
 
 > 兼容保留的旧节点：**保留注册但菜单不出现**，在定义文件注释说明替代关系
 > （例：`math.py` 的 MathAdd 系列、`entity.py` 的 EntityAddMesh/EntityAddCamera）。
+
+### 3.1 扩展节点（不要改核心 10 步清单）
+
+扩展开发者使用 `Application/Functions/<id>/node_pack.py`（或
+`ctx.nodes.register_pack`），由 `NodePackRegistry` 自动完成类型/菜单/求值器/字段注册：
+
+```python
+def register() -> dict:
+    return {
+        "id": "myext", "owner": "myext", "name": "My Extension",
+        "nodes": [{
+            "type": "ext.myext.MyNode", "label": "My Node", "category": "MyExt",
+            "pins": [{"name": "exec_in", "kind": "exec", "direction": "input"}],
+            "fields": [{"key": "gain", "label": "Gain", "kind": "float"}],
+            "evaluator": my_eval,          # 可选；纯函数 (node_id, ctx, graph)
+        }],
+        "menu": [("My Extension", [("My Node", "ext.myext.MyNode")])],
+    }
+```
+
+- 内置 `Application/Functions/**/node_pack.py` 与用户扩展目录的 `node_pack.py` 自动发现；
+- 不需要改 `node_types/__init__.py` / `styling.MENU_SECTIONS` / `evaluators/__init__.py`；
+- type 名是持久化契约：官方迁移可保留旧名（如 `SerialSend`），新扩展建议 `ext.<id>.<Type>`；
+- 发现入口：`graph.types`（type/label/category/owner/pins/fields）；
+- `graph.add` 不要求连线；可先建节点池再连线。
 
 ---
 

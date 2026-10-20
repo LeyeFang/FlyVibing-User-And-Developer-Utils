@@ -16,8 +16,13 @@
                                                  # 像素采样（裸帧 → 指定点 RGBA; 顶左坐标）
     engine-editor-cli setup [--workspace DIR]    # 向任意工作区安装 skill + mcp.json
     engine-editor-cli doc [tools|tool 名]        # 内置文档（索引优先）+ 开发工具索引
+    engine-editor-cli launch [--port auto|8977]  # 启动引擎并等待就绪（多实例自动选空闲端口）
+    engine-editor-cli engines                   # 扫描 8977..9076，列出运行中的编辑器
 
 退出码: 0 成功 / 1 引擎或运行时错误 / 2 用法错误。
+
+多引擎: 每个 agent 先 `launch --port auto`，把返回的 port 填到后续调用
+（全局 `--port N` 或环境变量 `MGE_EDITOR_MCP_PORT=N`）；不同 agent 使用不同端口。"
 """
 
 from __future__ import annotations
@@ -42,6 +47,7 @@ from .client import (
     send_raw,
     validate_graph_orchestrate,
 )
+from .launcher import LaunchError, discover_engines, launch_engine
 
 _SKILL_DIR_NAME = "engine-editor"
 _SKILL_TARGETS = {
@@ -86,6 +92,22 @@ def _load_json_arg(raw: str) -> dict:
         with open(raw[1:], "r", encoding="utf-8") as fh:
             return json.load(fh)
     return json.loads(raw)
+
+
+def _startup_settings(ns) -> dict:
+    """launch 的设置参数: --settings JSON/@file + 重复 --set k=v（后者覆盖）。"""
+    settings: dict = {}
+    if getattr(ns, "settings", None):
+        data = _load_json_arg(ns.settings)
+        if not isinstance(data, dict):
+            raise ValueError("--settings must be a JSON object")
+        settings.update(data)
+    for pair in getattr(ns, "set", []) or []:
+        if "=" not in pair:
+            raise ValueError(f"--set expects KEY=VALUE, got {pair!r}")
+        key, raw = pair.split("=", 1)
+        settings[key.strip()] = _coerce(raw)
+    return settings
 
 
 def _send_checked(name: str, args: dict) -> dict:
@@ -259,6 +281,45 @@ def cmd_capture(ns) -> int:
     return 0
 
 
+def cmd_launch(ns) -> int:
+    """启动独立编辑器实例并等待握手。"""
+    try:
+        settings = _startup_settings(ns)
+        # `cli --port 8978 launch`（全局端口）与 `launch --port 8978` 都接受；
+        # 子命令显式指定优先，否则继承全局 --port。
+        launch_port = ns.launch_port
+        if (launch_port is None or str(launch_port).strip().lower() in ("", "auto")) \
+                and getattr(ns, "port", None) is not None:
+            launch_port = ns.port
+        result = launch_engine(
+            engine_root=ns.engine_root,
+            port=launch_port,
+            language=ns.language,
+            settings=settings,
+            timeout_s=ns.timeout,
+        )
+    except ValueError as e:
+        return _fail(f"launch: {e}", 2)
+    except LaunchError as e:
+        try:
+            payload = json.loads(str(e))
+        except ValueError:
+            payload = {"ok": False, "error": str(e)}
+        _out(payload)
+        return 1
+    _out(result)
+    return 0
+
+
+def cmd_engines(ns) -> int:
+    """扫描端口频段，列出可响应的编辑器实例。"""
+    if ns.start > ns.end:
+        return _fail("--start must be <= --end", 2)
+    found = discover_engines(ns.start, ns.end, ns.timeout)
+    _out({"count": len(found), "engines": found, "range": [ns.start, ns.end]})
+    return 0
+
+
 def cmd_probe(ns) -> int:
     """像素采样 — 裸帧（零 PNG 编码）→ 指定点 RGBA（顶左坐标系）。
 
@@ -295,7 +356,8 @@ def _skill_source() -> Path:
     return Path(__file__).resolve().parent / "skills" / _SKILL_DIR_NAME
 
 
-def _update_mcp_json(path: Path, python_cmd: str, profile: str, uninstall: bool) -> None:
+def _update_mcp_json(path: Path, python_cmd: str, profile: str, uninstall: bool,
+                     port: int | None = None, engine_root: str | None = None) -> None:
     data: dict = {}
     if path.is_file():
         try:
@@ -306,16 +368,23 @@ def _update_mcp_json(path: Path, python_cmd: str, profile: str, uninstall: bool)
     if uninstall:
         servers.pop("engine-editor-live", None)
     else:
-        servers["engine-editor-live"] = {
+        args = ["-m", "engine_editor_mcp", "--profile", profile]
+        if port is not None:
+            args += ["--port", str(port)]
+        entry = {
             "type": "stdio",
             "command": python_cmd,
-            "args": ["-m", "engine_editor_mcp", "--profile", profile],
+            "args": args,
         }
+        if engine_root:
+            entry["env"] = {"MGE_ENGINE_ROOT": os.path.abspath(engine_root)}
+        servers["engine-editor-live"] = entry
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"[mcp] {path}")
     if not uninstall:
-        print(f"[mcp] command: {python_cmd} -m engine_editor_mcp --profile {profile}")
+        extra = f" --port {port}" if port is not None else ""
+        print(f"[mcp] command: {python_cmd} -m engine_editor_mcp --profile {profile}{extra}")
 
 
 def cmd_setup(ns) -> int:
@@ -330,7 +399,8 @@ def cmd_setup(ns) -> int:
     if ns.dry_run:
         for name in targets:
             print(f"[dry-run] skill -> {ws / _SKILL_TARGETS[name] / _SKILL_DIR_NAME}")
-        print(f"[dry-run] mcp   -> {mcp_path} (profile={ns.profile}, python={python_cmd})")
+        print(f"[dry-run] mcp   -> {mcp_path} (profile={ns.profile}, python={python_cmd}, "
+              f"port={ns.mcp_port or 'default'}, engine_root={ns.engine_root or 'auto'})")
         return 0
 
     print(f"[workspace] {ws}")
@@ -339,7 +409,7 @@ def cmd_setup(ns) -> int:
             dest = ws / _SKILL_TARGETS[name] / _SKILL_DIR_NAME
             shutil.rmtree(dest, ignore_errors=True)
             print(f"[remove] {dest}")
-        _update_mcp_json(mcp_path, python_cmd, ns.profile, uninstall=True)
+        _update_mcp_json(mcp_path, python_cmd, ns.profile, uninstall=True, port=ns.mcp_port)
     else:
         for name in targets:
             dest = ws / _SKILL_TARGETS[name] / _SKILL_DIR_NAME
@@ -347,7 +417,8 @@ def cmd_setup(ns) -> int:
                 shutil.rmtree(dest)
             shutil.copytree(src, dest)
             print(f"[skill] {dest}")
-        _update_mcp_json(mcp_path, python_cmd, ns.profile, uninstall=False)
+        _update_mcp_json(mcp_path, python_cmd, ns.profile, uninstall=False,
+                         port=ns.mcp_port, engine_root=ns.engine_root)
     print("[note] 重载 IDE 窗口（或 MCP: List Servers 重启）后生效")
     return 0
 
@@ -361,6 +432,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="MyGameEngine 编辑器实时控制 CLI（需编辑器运行中; 默认 127.0.0.1:8977）",
     )
     parser.add_argument("--version", action="version", version=f"engine-editor-cli {__version__}")
+    parser.add_argument("--port", type=int, default=None,
+                        help="编辑器监听端口（放在子命令前; 默认 env MGE_EDITOR_MCP_PORT 或 8977）")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("ops", help="op 目录（一行一个）")
@@ -422,10 +495,32 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--workspace", default=".", help="目标工作区（默认当前目录）")
     p.add_argument("--profile", choices=("lite", "full"), default="lite", help="MCP 档位（默认 lite）")
     p.add_argument("--python", default="", help="MCP 启动用的 Python 解释器（默认当前解释器）")
+    p.add_argument("--port", dest="mcp_port", type=int, default=None,
+                   help="写入 mcp.json 的固定端口（多 agent 时每个工作区配不同端口）")
+    p.add_argument("--engine-root", "--engine", dest="engine_root", default=None,
+                   help="写入 mcp.json 的 MGE_ENGINE_ROOT（便于 engine_launch 跨工作区启动）")
     p.add_argument("--skills", choices=("github", "claude", "agents", "all", "none"), default="github")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--uninstall", action="store_true")
     p.set_defaults(func=cmd_setup)
+
+    p = sub.add_parser("launch", help="启动引擎并等待命令总线就绪（自动端口协商）")
+    p.add_argument("--engine-root", "--engine", dest="engine_root", default=None,
+                   help="引擎根目录（默认 env MGE_ENGINE_ROOT 或当前目录向上查找）")
+    p.add_argument("--port", dest="launch_port", default="auto",
+                   help="auto（默认，8977..9076 首个空闲）或固定端口（也可用全局 --port）")
+    p.add_argument("--language", choices=("en", "zh"), default=None, help="启动语言")
+    p.add_argument("--settings", help="设置 JSON（或 @file.json）；与 Settings 面板同键")
+    p.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                   help="设置覆盖（可重复，如 --set ui.font_scale=1.15）")
+    p.add_argument("--timeout", type=float, default=30.0, help="等待就绪秒数")
+    p.set_defaults(func=cmd_launch)
+
+    p = sub.add_parser("engines", help="扫描端口频段，列出运行中的编辑器")
+    p.add_argument("--start", type=int, default=8977)
+    p.add_argument("--end", type=int, default=9076)
+    p.add_argument("--timeout", type=float, default=0.25)
+    p.set_defaults(func=cmd_engines)
 
     return parser
 
@@ -437,6 +532,8 @@ def main(argv: list[str] | None = None) -> int:
     except (AttributeError, ValueError):
         pass
     ns = build_parser().parse_args(argv)
+    if getattr(ns, "port", None) is not None:
+        os.environ["MGE_EDITOR_MCP_PORT"] = str(ns.port)
     try:
         return int(ns.func(ns) or 0)
     except KeyboardInterrupt:

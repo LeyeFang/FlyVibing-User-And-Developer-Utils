@@ -13,9 +13,9 @@ FlyVibing Utils 是 [FlyVibingEngine](https://github.com/LeyeFang/MyGameEngine-P
 
 | 包 | 入口 | 用途 | 需要编辑器运行 |
 |---|---|---|---|
-| **`editor-mcp`** | `engine-editor-cli`、`engine-editor-mcp` | 通过回环命令总线实时控制编辑器，提供 CLI 与 MCP 服务端（lite/full 两档）。 | 是 |
-| **`node-editor`** | `flyvibing-node-editor` | 离线流水线：实验 spec → 图 JSON → 注入 `.scene`；包含规则参考、校验与静态执行流检查。 | 否 |
-| **`extension-kit`** | `flyvibing-review` | 扩展静态审查与无头 Dear ImGui 测试工具。 | 否 |
+| **`editor-mcp`** | `engine-editor-cli`、`engine-editor-mcp` | 通过 CLI 与 MCP 服务端实时控制编辑器。 | 是 |
+| **`node-editor`** | `flyvibing-node-editor` | 离线完成节点图编排、校验与场景注入。 | 否 |
+| **`extension-kit`** | `flyvibing-review` | 扩展静态审查与无头 ImGui 测试。 | 否 |
 
 `skills/` 目录包含 `engine-editor` 与 `node-graph` 技能的源文件。构建时它们分别同步进 `editor-mcp` 与 `node-editor` 包。`engine-editor-cli setup` 安装 `engine-editor` 技能与 MCP 配置；`node-graph` 技能随 `node-editor` 包分发。
 

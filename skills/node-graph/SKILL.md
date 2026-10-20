@@ -48,10 +48,11 @@ spec 字段/示例见 `rules "build_graph Spec"`。要点:
 - `entities[]` 先 spawn 后统一隐藏；seed 链固定挂 OnGameStart。
 
 **校验（必做）**: 先过离线 L1（不需引擎）——
-`python -m flyvibing_node_editor.node_graph_validator <scene.scene>`（加 `--frames 360` 连干跑），
+`python -m flyvibing_node_editor.node_graph_validator <scene.scene>`（加 `--frames 360` 连干跑；
+按绝对时长用 `--seconds 32 --dt 0.0041666667` 模拟 240Hz 逻辑帧），
 与在线 `graph.validate.*` 是**同一实现**。引擎已启动时也可用
 `engine-editor-cli validate --source graph --graph @graph.json`（或 MCP `engine_validate_graph`），
-零告警再交付；无头环境用 `PlayerEntry --dry-run`。
+零告警再交付；无头环境用 `PlayerEntry --dry-run --seconds 32 --dt 0.0041666667`。
 
 **看不懂图的执行顺序时**: `python -m flyvibing_node_editor.cli flow --scene <scene>` —— 纯静态、
 不跑引擎，输出从事件节点出发的执行链（Branch 标条件来源、TimeTrigger 标 `[GATE]`、环标 `[CYCLE]`）。

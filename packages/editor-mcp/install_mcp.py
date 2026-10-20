@@ -3,8 +3,9 @@ r"""
 Engine Editor Live MCP — 一键安装（跨平台）。
 
 用法（dev 仓库）:
-  .venv-py314t\Scripts\python.exe packages/editor-mcp/install_mcp.py                # 默认 lite 档（5 精简工具, 省 token）
-  .venv-py314t\Scripts\python.exe packages/editor-mcp/install_mcp.py --profile full # 旧 44 工具档
+  .venv-py314t\Scripts\python.exe packages/editor-mcp/install_mcp.py                # 默认 lite 档（6 精简工具, 省 token）
+  .venv-py314t\Scripts\python.exe packages/editor-mcp/install_mcp.py --profile full # 旧 45 工具 + engine_launch
+  .venv-py314t\Scripts\python.exe packages/editor-mcp/install_mcp.py --port 8978    # 固定 MCP 端口（多 agent）
   .venv-py314t\Scripts\python.exe packages/editor-mcp/install_mcp.py --uninstall
 
 用法（安装版 / 零外部 Python）:
@@ -19,9 +20,29 @@ import json
 import os
 import shutil
 import sys
+from pathlib import Path
 
-PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+_PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 SERVER_NAME = "engine-editor-live"
+
+
+def _find_project_dir() -> str:
+    """引擎根目录: env MGE_ENGINE_ROOT > cwd/包目录向上查找 startup.bat。"""
+    env_root = os.environ.get("MGE_ENGINE_ROOT", "").strip()
+    candidates = [Path(env_root)] if env_root else []
+    for base in (Path.cwd(), Path(_PACKAGE_DIR)):
+        candidates.extend([base, *base.parents])
+    for candidate in candidates:
+        try:
+            root = candidate.resolve()
+        except OSError:
+            continue
+        if (root / "startup.bat").is_file() and (root / "Application" / "EntryPoint.py").is_file():
+            return str(root)
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(_PACKAGE_DIR))))
+
+
+PROJECT_DIR = _find_project_dir()
 
 
 def _python_command() -> str:
@@ -58,7 +79,7 @@ def _write_config(path: str, config: dict) -> None:
 
 
 def _skill_source() -> str:
-    return os.path.join(PROJECT_DIR, "Utils", "ExtDev", "EditorMcp", "src", "engine_editor_mcp", "skills", "engine-editor")
+    return os.path.join(_PACKAGE_DIR, "src", "engine_editor_mcp", "skills", "engine-editor")
 
 
 def _skill_dest() -> str:
@@ -77,7 +98,7 @@ def _sync_skill() -> None:
     print(f"  ✓ skill 已同步 → {dest}")
 
 
-def install(profile: str = "lite") -> int:
+def install(profile: str = "lite", port: int | None = None) -> int:
     print("=" * 50)
     print("  Engine Editor Live MCP — Install")
     print("=" * 50)
@@ -92,22 +113,26 @@ def install(profile: str = "lite") -> int:
     config_path = _mcp_path()
     config = _read_config(config_path)
     config.setdefault("servers", {})
+    args = ["-m", "engine_editor_mcp", "--profile", profile]
+    if port is not None:
+        args += ["--port", str(port)]
     config["servers"][SERVER_NAME] = {
         "type": "stdio",
         "command": _python_command(),
-        "args": ["-m", "engine_editor_mcp", "--profile", profile],
+        "args": args,
         "cwd": PROJECT_DIR,
     }
     _write_config(config_path, config)
+    extra = f" --port {port}" if port is not None else ""
     print(f"  ✓ 注册 '{SERVER_NAME}'（profile={profile}） → {config_path}")
-    print(f"    command: {_python_command()} -m engine_editor_mcp --profile {profile}")
+    print(f"    command: {_python_command()} -m engine_editor_mcp --profile {profile}{extra}")
 
-    server_src = os.path.join(PROJECT_DIR, "Utils", "ExtDev", "EditorMcp", "mcp_server.py")
+    server_src = os.path.join(_PACKAGE_DIR, "mcp_server.py")
     print(f"  ✓ mcp_server.py: {'found' if os.path.isfile(server_src) else 'MISSING!'}")
     _sync_skill()
     print()
     print("下一步: 重载 VS Code 窗口（或 Command Palette → 'MCP: List Servers' 重启）")
-    print("提示: lite 档 = 5 个精简工具（省 token）; 需要旧 44 工具用 --profile full")
+    print("提示: lite 档 = 6 个精简工具（省 token）; 需要旧 45 工具 + engine_launch 用 --profile full")
     return 0
 
 
@@ -132,4 +157,13 @@ if __name__ == "__main__":
         _i = sys.argv.index("--profile")
         if _i + 1 < len(sys.argv):
             _profile = sys.argv[_i + 1]
-    sys.exit(uninstall() if "--uninstall" in sys.argv else install(_profile))
+    _port = None
+    if "--port" in sys.argv:
+        _i = sys.argv.index("--port")
+        if _i + 1 < len(sys.argv):
+            try:
+                _port = int(sys.argv[_i + 1])
+            except ValueError:
+                print("--port expects an integer", file=sys.stderr)
+                sys.exit(2)
+    sys.exit(uninstall() if "--uninstall" in sys.argv else install(_profile, _port))

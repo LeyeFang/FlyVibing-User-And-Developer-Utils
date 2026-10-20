@@ -28,11 +28,58 @@ flowchart LR
 | 项 | 值 |
 |---|---|
 | 地址 | `127.0.0.1:<port>`（**仅回环**，外部网络不可达） |
-| 端口 | 默认 `8977`；环境变量 `MGE_EDITOR_MCP_PORT` 覆盖（编辑器与 MCP 两侧都读） |
-| 启动 | 编辑器加载时由 `EditorModule.on_load → LiveCommandServer.start()` 自动启动 |
+| 端口 | 默认 `8977`；优先级：显式 `start()` > 环境变量 `MGE_EDITOR_MCP_PORT` > Settings `server.port`（1024..65535） |
+| 启动 | 编辑器加载时由 `EditorModule.on_load → EditorSettings.load() → LiveCommandServer.start()` 自动启动 |
 | 停止 | `EditorModule.on_unload → stop()`；daemon 线程随进程退出 |
-| 端口占用 | 打印 `[Live] WARNING: cannot bind ...` 并禁用（不阻塞编辑器） |
+| 端口占用 | 打印 `[Live] WARNING: cannot bind ...` 并禁用（不阻塞编辑器）；用 `launch --port auto` 可避开 |
 | 审计日志 | 每条命令在主线程打印 `[Live] id=<n> op=<op> → ok / ERR ...` |
+
+### 2.1 启动设置与多引擎端口协商（v0.5.0）
+
+**Settings 面板**（Edit ▸ Preferences… ▸ Common）新增 **Port**（`server.port`）：
+修改后**下次启动编辑器**生效；端口范围 `1024..65535`。
+中文：端口设置只影响监听地址，不改变 op/UI 语义。
+English: **Port** controls the loopback listen port; it is applied on the next editor start.
+
+引擎启动参数（`startup.bat` 原样转发给 `Application/EntryPoint.py`）:
+
+```powershell
+startup.bat --port 8978 --language zh --set ui.font_scale=1.15
+startup.bat --settings '{"ui.language":"en","ui.font_scale":1.0,"server.port":8978}'
+```
+
+| 参数 | 等价 Settings 键 | 说明 |
+|---|---|---|
+| `--port N` | `server.port` | 整数，1024..65535；只作用于本次进程 |
+| `--language en\|zh` / `--lang` | `ui.language` | 启动语言（中/英） |
+| `--set KEY=VALUE` | 任意 Settings 键 | 可重复；value 先按 JSON 解析，失败按字符串 |
+| `--settings JSON` | 多个键 | JSON 对象或 `@file.json` |
+| `--settings-file PATH` | 多个键 | JSON 对象文件（`--set` 最后覆盖） |
+
+启动覆盖**不落盘**（面板里的修改仍走 `settings.set` 持久化）；未知键/非法端口会快速失败。
+注意：环境变量 `MGE_EDITOR_MCP_PORT` 优先于 `server.port`，所以自动化启动建议同时设置
+（`launch` 已自动设置）。
+
+**CLI 一条命令启动（推荐给 agent）**:
+
+```powershell
+# 自动在 8977..9076 选空闲端口，等待 sim.state 握手后返回 {ok, port, pid, ...}
+engine-editor-cli launch --port auto --language zh --set ui.font_scale=1.15
+
+# 后续命令必须指向同一端口（或设置 MGE_EDITOR_MCP_PORT）
+engine-editor-cli --port 8977 call settings.get
+engine-editor-cli --port 8977 capture editor --out shot.png
+
+# 发现本机运行中的编辑器（按端口升序）
+engine-editor-cli engines
+```
+
+**MCP**: lite/full 档都有 `engine_launch(engine_root=None, port="auto", language=..., settings={...})`
+（`engine_root` 省略 → `MGE_ENGINE_ROOT` / 当前目录向上查找）；
+成功后该 MCP 进程把返回的 port 设为后续 `engine_call` / `engine_batch` / `engine_capture` 的默认端口。
+多 agent 各自启动自己的 MCP 进程并 `engine_launch(port="auto")`，即可得到互不串话的端口频段；
+也可以给每个 MCP 进程配 `--port N`（`mcp.json` 的 args）连接固定实例。
+English: each agent launches its own editor with an auto-selected port; the MCP process remembers that port.
 
 ## 3. 协议（NDJSON + 二进制尾帧）
 
@@ -69,8 +116,9 @@ flowchart LR
 | `renderer.snapshot` | — | — | **渲染器状态快照**（后端 / GL 信息 / 资源计数 / 视口 / 帧统计；协议 `rendering_protocol.md`；无头时 `available=false`） | `{available, backend, gl, viewport, counts, overlays, stats}` |
 | `camera.get` | `editor_camera_get` | `{"role": "3d"\|"2d"\|"overlay"}` | 读场景摄像机实体（Transform + Camera） | `{position, rotation, projection, ...}` |
 | `camera.set` | `editor_camera_set` | role + 部分字段（position/rotation/projection/ortho_size/fov/...） | Inspector 改摄像机属性（仅编辑器场景） | 更新后快照 |
-| `graph.list` | `editor_graph_list` | — | 节点图快照（复用 canvas API, 不经 UI） | `{nodes, links}`（节点带 alias/description） |
-| `graph.add` | `editor_graph_add` | `{"type", "props"?, "description"?, "position"?}` | Add 菜单加节点 | `{node_id, type, props, description}` |
+| `graph.list` | `editor_graph_list` | — | 节点图快照（复用 canvas API, 不经 UI） | `{nodes, links}`（节点带 owner/alias/description） |
+| `graph.types` | — | `{"owner"?, "category"?}` | 节点类型发现（核心 + 扩展 node_pack） | `{types: [{type,label,category,owner,pins}], packs}` |
+| `graph.add` | `editor_graph_add` | `{"type", "props"?, "description"?, "position"?}` | Add 菜单加节点；**不要求连线**（节点池） | `{node_id, type, owner, pins, props, description}` |
 | `graph.link` | `editor_graph_link` | `{"from": {node,pin}, "to": {node,pin}}` | 画布拖线 | `{link_id}` |
 | `graph.set_props` | `editor_graph_set_props` | `{"node", "props"}` | 内联控件改属性 | `{node_id, props}` |
 | `graph.set_description` | — | `{"node", "description"?}` | 节点卡 Description 编辑区（省略=读；空串=清除） | `{node_id, description}` |
@@ -154,20 +202,23 @@ UI 入口：Node Editor 工具栏 **Validate** 按钮（静态 / 360 帧 / 600 �
   **纯 socket 客户端，不 import Application**（测试守卫已扩展到包源码）；
   三方工作区：`pip install` wheel（零依赖构建: `python FlyVibing-User-And-Developer-Utils/packages/editor-mcp/build_wheel.py`）→
   `engine-editor-cli setup --workspace <项目>`（拷贝 Skill + 合并 mcp.json, 默认 lite 档）；详见 `FlyVibing-User-And-Developer-Utils/packages/editor-mcp/README.md`。
-- **op 注册表（单一 事实源）**：`src/engine_editor_mcp/ops.py`（59 ops: 摘要/参数/分类/旧工具别名;  每 op 含 call_timeout）。
+- **op 注册表（单一 事实源）**：`src/engine_editor_mcp/ops.py`（60 ops: 摘要/参数/分类/旧工具别名;  每 op 含 call_timeout）。
   **扩展 op**（`ext.<id>.*`）为运行期增量注册，不入本静态表 — 发现用 `extension.list`, 调用直接透传
   （见 `Doc/ExtDev/extension_dev_protocol.md` §9）。
   驱动：CLI 命令与帮助、lite MCP 的 engine_help/engine_call、`docgen` 生成 `references/ops.md`；
   完整性由 `Test/Application/Editor/test_editor_mcp_package.py` 对照 `_register_ops` 守卫（新增 op 必须同步）。
 - **MCP 档位**（`--profile lite|full` > env `MGE_MCP_PROFILE` > 默认 full）：
-  - `lite`（推荐; 5 工具 ≈2.3k schema 字符 — 相比 full 45 工具 ≈17.9k 字符约 -87%）:
+  - `lite`（推荐; 6 工具）:
     `engine_help`（op 目录/详情, 按需读取）、`engine_call`（单 op; 兼容旧工具名; 大载荷自动瘦身）、
-    `engine_batch`（顺序多 op, 省往返）、`engine_validate_graph`（detail=summary 默认）、`engine_capture`（图像直回）；
-  - `full`：v1–v4 全部 45 个 `editor_*` 工具（向后兼容, 行为不变）—— lite 工具不注册；
+    `engine_batch`（顺序多 op, 省往返）、`engine_validate_graph`（detail=summary 默认）、`engine_capture`（图像直回）、
+    `engine_launch`（启动引擎 + 自动端口握手）；
+  - `full`：v1–v4 全部 45 个 `editor_*` 工具 + 共享 `engine_launch`（向后兼容, 行为不变）—— lite 专属工具不注册；
   - 工具集裁剪在 `server.py::apply_profile`（幂等; 内部结构不可用时 fail-open）。
 - **CLI**（`engine-editor-cli`, 零常驻上下文成本 — 终端型 agent 首选）：
   `ops` / `help` / `call <op> k=v...` / `batch` / `exec <script.py>`（注入 `engine` 客户端, 脚本内过滤输出）/
-  `validate`（阻塞编排, summary 默认）/ `capture`（只落盘）/ `setup`（向任意工作区装 Skill+mcp.json）。
+  `validate`（阻塞编排, summary 默认）/ `capture`（只落盘）/ `setup`（向任意工作区装 Skill+mcp.json）/
+  `launch`（启动引擎 + 自动端口握手）/ `engines`（扫描 8977..9076 发现实例）；
+  全局 `--port N` 放在子命令前，或 `MGE_EDITOR_MCP_PORT=N`。
 - **Skill**（`engine-editor`, 渐进披露）：SKILL.md（通道选择/速查/纪律）+ `references/ops.md`（docgen 生成）
   + `references/workflows.md`（配方）；安装: `engine-editor-cli setup` 或仓库 `install_mcp.py`（同步到 `.github/skills/`）。
 - **帧图像**（`engine_capture`）：request → 轮询 fetch → numpy 翻转（GL bottom-up → top-down，本进程）→
@@ -199,7 +250,10 @@ UI 入口：Node Editor 工具栏 **Validate** 按钮（静态 / 360 帧 / 600 �
 |---|---|
 | MCP 工具报"编辑器未运行" | 编辑器没开 / 端口被环境变量改了两侧不一致 / 启动日志里有 bind 失败 |
 | 工具一直超时 | 编辑器主线程被卡住（如 modal 操作）；看编辑器控制台 `[Live] id=...` 是否有输出 |
-| 端口占用 | 改 `MGE_EDITOR_MCP_PORT`（两侧同时设）或关掉占用进程 |
+| 端口占用 | 改 Settings ▸ Common ▸ Port / `MGE_EDITOR_MCP_PORT`（两侧同时设），或 `engine-editor-cli launch --port auto` |
+| 多个编辑器互相串话 | 每个 agent `launch --port auto` 后用自己的 `--port N`；`engines` 可核对端口；不要共用默认 8977 |
+| `launch` 找不到引擎 | 传 `--engine-root <仓库根>`（需含 `startup.bat`）或设 `MGE_ENGINE_ROOT` |
+| `launch` 超时但进程还在 | 看返回的 `log_path`；引擎窗口启动慢时增大 `--timeout`，不要重复启动 |
 | `.vscode/mcp.json` 不生效 | 重载 VS Code 窗口；或 Command Palette → `MCP: List Servers` 手动重启 |
 | 某个 server 的工具缺失 / 启动失败 | `.vscode/mcp.json` 的 `command`/`cwd` 指向已搬迁的旧仓库路径（2026-09 实测: node-graph-editor 曾指向 `...\MI-SSSEP\Experiment\MyGameEngine-Python`，该路径已不存在）→ 用 `Test-Path` 核对后更新为当前仓库路径，再重载 VS Code |
 | `editor_capture` 超时 / 一直 pending | PIE 未运行（报 `PIE is not running`）/ 渲染线程卡住；看控制台 `[Live] frame.*` 审计行与 `sim.state` |
@@ -244,8 +298,10 @@ UI 入口：Node Editor 工具栏 **Validate** 按钮（静态 / 360 帧 / 600 �
 
 ## 9. 路线（后续阶段）
 
-- **agent 通道 v0.4.0（2026-10-05 落地）**：MCP 双档位（lite 5 工具 / full 45 工具）+ CLI
+- **agent 通道 v0.4.0（2026-10-05 落地）**：MCP 双档位（当时 lite 5 工具 / full 45 工具）+ CLI
   （ops/help/call/batch/exec/validate/capture/setup）+ Skill（渐进披露）+ op 注册表/文档生成 —— 见 §5/§6。
+- **v0.5.0（2026-10-19）**：Settings `server.port` + 启动参数（`--port/--language/--settings`）、
+  CLI `launch`/`engines`、MCP `engine_launch`、多引擎自动端口频段（8977..9076）。
 - ~~阶段 2~~（2026-09-28 大部分落地）：`sim.stop` ✅、图编辑 ops（`graph.add/link/set_props` + `graph.list` ✅；
   `graph.remove` 未做）、`view.screenshot` ✅（`frame.request/fetch` + `editor_capture`，PNG 在 MCP 进程）；
   仍缺：`sim.pause/resume` 暴露、`graph.remove`、帧环形日志（"实时图像=调试日志"）；容器级缺口见 §10。

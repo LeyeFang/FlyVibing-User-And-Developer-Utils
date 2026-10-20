@@ -1,7 +1,7 @@
 """Op registry — 编辑器 Live op 的单一事实源（CLI / 精简 MCP / 文档生成共用）。
 
 数据来源与责任:
-  - 引擎侧实现: Application/Editor/Services/LiveCommandServer.py `_register_ops()`（59 ops）;
+  - 引擎侧实现: Application/Editor/Services/LiveCommandServer.py `_register_ops()`（60 ops）;
   - 本注册表是 agent 侧（CLI/MCP/Skill）的唯一元数据来源;
   - 新增 op 时: 引擎侧注册实现 → 本表加条目 → `python -m engine_editor_mcp.docgen` 重生成 ops.md;
   - 完整性由 Test/Application/Editor/test_editor_mcp_package.py 对照引擎源码守卫。
@@ -153,9 +153,12 @@ OPS: dict[str, OpSpec] = {o.name: o for o in [
     OpSpec("resource.material.get", "resource", "材质详情（shader/颜色/纹理槽/uniform）",
            (Param("id", "int", False, "id / name 二选一"), Param("name", "str", False, ""))),
     # ── graph ──
-    OpSpec("graph.list", "graph", "节点图快照（nodes: id/type/alias/description/props/pins; links）"),
-    OpSpec("graph.add", "graph", "添加节点（等同 Add 菜单）",
-           (Param("type", "str", True, "节点类型名，如 EntitySpawn"),
+    OpSpec("graph.list", "graph", "节点图快照（nodes: id/type/owner/alias/description/props/pins; links）"),
+    OpSpec("graph.types", "graph", "发现可用节点类型（含扩展 node_pack）: type/label/category/owner/pins",
+           (Param("owner", "str", False, "只看某个扩展，如 device"),
+            Param("category", "str", False, "只看某个分类"))),
+    OpSpec("graph.add", "graph", "添加节点（等同 Add 菜单；不要求连线，可先建节点池）",
+           (Param("type", "str", True, "节点类型名，如 EntitySpawn / graph.types 查询"),
             Param("props", "json", False, "节点属性 dict"),
             Param("description", "str", False, "节点描述（agent/新手可读）"),
             Param("position", "json", False, "[x,y] 画布位置"))),
@@ -266,16 +269,20 @@ ALIASES: dict[str, tuple[str, dict[str, Any]]] = {
 # engine_help / CLI `help <topic>` 的主题索引（完整文本按需返回 — 渐进披露）
 TOPIC_HELP = {
     "mcp": (
-        "lite 档 MCP 工具（5 个）:\n"
+        "lite 档 MCP 工具（6 个）:\n"
         "  engine_help(op|topic)      — 本目录 / 单 op 详情（按需读取，省 token）\n"
         "  engine_call(op, args)      — 执行 1 个 op（兼容旧工具名; 大载荷自动瘦身）\n"
         "  engine_batch(calls)        — 一次调用顺序执行多个 op\n"
         "  engine_validate_graph(...) — 图干跑校验（detail=summary 默认）\n"
         "  engine_capture(target)     — 抓帧（图像直回; 想省 token 用 CLI capture）\n"
-        "完整档: 启动参数 --profile full 或 env MGE_MCP_PROFILE=full（45 个 editor_* 旧工具）。"
+        "  engine_launch(...)         — 启动引擎 + 自动端口握手（多 agent 各用自己的端口）\n"
+        "完整档: 启动参数 --profile full 或 env MGE_MCP_PROFILE=full（45 个 editor_* 旧工具 + engine_launch）。"
     ),
     "cli": (
         "engine-editor-cli（终端模式，零常驻上下文成本 — 首选）:\n"
+        "  engine-editor-cli launch [--port auto] [--language en|zh] [--set k=v]  # 启动引擎 + 握手\n"
+        "  engine-editor-cli engines                    # 扫描 8977..9076，列出运行中的编辑器\n"
+        "  engine-editor-cli --port 8977 call ...       # 指定实例（全局 --port 放子命令前）\n"
         "  engine-editor-cli ops                        # op 目录\n"
         "  engine-editor-cli help <op>                  # 单 op 详情\n"
         "  engine-editor-cli call <op> k=v ... [--json '{...}']\n"
@@ -283,8 +290,9 @@ TOPIC_HELP = {
         "  engine-editor-cli exec script.py             # 脚本模式（全局 engine 客户端）\n"
         "  engine-editor-cli validate [--detail full]   # 图干跑校验（阻塞编排）\n"
         "  engine-editor-cli capture pie --out f.png    # 抓帧落盘（只回路径）\n"
-        "  engine-editor-cli setup [--workspace DIR]    # 安装 skill + mcp.json（独立分发）\n"
+        "  engine-editor-cli setup [--workspace DIR] [--port N]  # 安装 skill + mcp.json\n"
         "值解析: 先尝试 JSON（数字/bool/数组/对象/引号字符串），失败按纯字符串。\n"
+        "多引擎: 每个 agent 先 launch --port auto，后续统一用返回的 --port N。\n"
         "脚本模式: engine.ok('sim.play'); engine.try_send(...); engine.capture('pie'); engine.batch([...])"
     ),
     "skill": (

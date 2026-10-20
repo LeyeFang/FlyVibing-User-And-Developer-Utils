@@ -1,6 +1,6 @@
 ---
 name: engine-editor
-description: "控制正在运行的 MyGameEngine 编辑器：创建/修改场景与实体、编辑与校验节点图、运行 PIE、抓帧截图、打开工程。Use when the user asks to build or edit experiment scenes in the engine, wire/validate node graphs, run or screenshot the editor, or AI-generate an engine project. 通道: engine-editor-cli（终端首选，省 token）或 engine-editor-live MCP（lite 档: engine_help / engine_call / engine_batch / engine_validate_graph / engine_capture）。"
+description: "控制正在运行的 MyGameEngine 编辑器：创建/修改场景与实体、编辑与校验节点图、运行 PIE、抓帧截图、打开工程。Use when the user asks to build or edit experiment scenes in the engine, wire/validate node graphs, run or screenshot the editor, or AI-generate an engine project. 通道: engine-editor-cli（终端首选，省 token）或 engine-editor-live MCP（lite 档: engine_help / engine_call / engine_batch / engine_validate_graph / engine_capture / engine_launch）。"
 ---
 
 # Engine Editor 实时控制（MyGameEngine）
@@ -9,9 +9,12 @@ description: "控制正在运行的 MyGameEngine 编辑器：创建/修改场景
 
 ## 0. 前置检查（先做，一次）
 
-1. 编辑器必须在运行（仓库: `startup.bat`；发行版: 安装快捷方式）。就绪标志（编辑器控制台）: `[Live] Editor command server on 127.0.0.1:8977`。
-2. 若返回 `编辑器未运行（127.0.0.1:8977 无监听）` → **不要重试循环**，直接告诉用户先启动编辑器。
-3. 端口自定义时两侧都设 `MGE_EDITOR_MCP_PORT`（默认 8977）。
+1. 编辑器必须在运行（仓库: `startup.bat`；发行版: 安装快捷方式）。就绪标志（编辑器控制台）: `[Live] Editor command server on 127.0.0.1:<port>`。
+2. 若返回 `编辑器未运行（127.0.0.1:<port> 无监听）` → **不要重试循环**：优先用
+   `engine-editor-cli launch --port auto` 启动一个新实例（自动选空闲端口并握手），或告诉用户先启动编辑器。
+3. 端口可在 Settings ▸ Common ▸ Port（下次启动生效）或启动参数 `--port N` 设置；
+   环境变量 `MGE_EDITOR_MCP_PORT` 优先。多 agent 时每个 agent 用 `launch --port auto` 拿自己的端口，
+   后续 CLI 加 `--port N`（放子命令前），MCP 的 `engine_launch` 会自动记住端口。
 
 ## 0.5 ★ 可运行性红线（先记住这条）
 
@@ -32,14 +35,17 @@ OnGameStart ──exec──> EntitySpawn(template=<实体名>)
 | 通道 | 未使用时的常驻成本 | 何时用 |
 |---|---|---|
 | `engine-editor-cli`（终端） | **0** | 默认首选：多步、批处理、脚本、需要过滤输出 |
-| MCP `engine_call` / `engine_batch` | ~0.7k tokens（lite 档 5 工具） | 无终端权限、或任务需要图像直回 |
-| MCP 旧 `editor_*` 工具（45 个） | ~5.6k tokens（full 档） | 仅当 `MGE_MCP_PROFILE=full` 且提示词已绑定旧工具名 |
+| MCP `engine_call` / `engine_batch` | ~1k tokens（lite 档 6 工具） | 无终端权限、或任务需要图像直回 |
+| MCP 旧 `editor_*` 工具（45 个 + `engine_launch`） | ~6k tokens（full 档） | 仅当 `MGE_MCP_PROFILE=full` 且提示词已绑定旧工具名 |
 | `engine_capture`（MCP） | 同 lite | 需要**看到**画面时；否则 `engine-editor-cli capture`（只落盘） |
 
 ## 2. CLI 速查
 
 ```powershell
-engine-editor-cli ops                        # op 目录（59 个核心 op; 一行一个; 扩展 op 见 extension.list）
+engine-editor-cli launch --port auto --language zh   # 启动引擎 + 自动端口握手（多引擎首选）
+engine-editor-cli engines                    # 列出运行中的编辑器端口
+engine-editor-cli --port 8977 call settings.get     # 全局端口指向某个实例
+engine-editor-cli ops                        # op 目录（60 个核心 op; 一行一个; 扩展 op 见 extension.list）
 engine-editor-cli help entity.transform      # 单 op 详情（参数 + 示例）
 engine-editor-cli call entity.add name=MCP_Cue
 engine-editor-cli call entity.transform id=5 position='[1,0,2]' scale=2
@@ -48,6 +54,8 @@ engine-editor-cli call component.set id=5 type=MeshRenderer fields='{"blend":"al
 engine-editor-cli call component.set id=5 type=MeshRenderer fields='{"shader":"Lighting"}'                    # 受光（默认场景含 Sun）
 engine-editor-cli call component.set name=X type=TextDisplay fields='{"text":"你好","size":72,"bold":true}'  # 文字（自动生成纹理; 见 text_protocol.md）
 engine-editor-cli call sim.play
+engine-editor-cli call graph.types owner=device              # 发现扩展节点（type/pins/fields）
+engine-editor-cli call graph.add type=SerialSend             # 只建节点不连线（节点池）
 engine-editor-cli call ui.panels                            # 面板发现（名称 + visible + kind）
 engine-editor-cli call ui.panel name="Node Editor" visible=true   # 打开/关闭面板（View 菜单同路径；闭环）
 engine-editor-cli batch ops.json             # [{"op":...,"args":{...}}, ...]（- = stdin）
@@ -85,7 +93,7 @@ engine-editor-cli doc tools              # 开发工具索引（test_runner / th
 | `selection.set` | 选中（截图前常用来打高亮/显示 gizmo） |
 | `component.add` / `component.set` / `component.get` | MeshRenderer: `mesh/material/material_name/color/shader/**blend**/uniform/texture/visible`；`blend`=`"opaque"|"alpha"`（透明由渲染器排序处理）；`shader` 切到 `Lighting` 可受方向光/环境光影响（切 shader 会重置材质 uniform — 先切后设参）；`TextDisplay`: `text/font/size/bold/italic/color/bg_color/align/...`（自动光栅化纹理; PIE 用 SetText 节点驱动） |
 | `scene.list` / `scene.switch` / `scene.save` / `scene.load` | 场景管理 |
-| `graph.list` / `graph.add` / `graph.link` / `graph.set_props` / `graph.set_description` | 节点图编辑（等价画布操作；节点带 alias/description） |
+| `graph.list` / `graph.types` / `graph.add` / `graph.link` / `graph.set_props` / `graph.set_description` | 节点图编辑（节点带 owner/alias/description）；`graph.types` 发现核心 + 扩展 node_pack；`graph.add` 不要求连线 |
 | `graph.validate.start`(→`state`/`report`) | 图干跑校验（静态+模拟; 见 §5） |
 | `graph.export` / `graph.import` | 图落盘/回灌（**export 一定带 `path`**，见 §5） |
 | `graph.fit` | 视图适配全部节点（截图/展示前常用） |
@@ -134,6 +142,8 @@ print("created:", ids)   # 只打印需要的信息 → 其余不进入上下文
 | 编辑器未运行（无监听） | 先启动编辑器，不要重试 |
 | 名称重复警告 | 按名取首个匹配；改用 `id` 精确指定 |
 | `capture pie` 报 PIE is not running | 先 `sim.play`，等 `sim.state` = Running |
-| 端口占用 | 双侧设 `MGE_EDITOR_MCP_PORT` 或关掉占用进程 |
+| 端口占用 | Settings ▸ Common ▸ Port / `MGE_EDITOR_MCP_PORT`，或 `launch --port auto`；不要与其它引擎共用默认端口 |
+| `launch` 找不到引擎 | 传 `--engine-root <含 startup.bat 的仓库根>` 或设 `MGE_ENGINE_ROOT` |
+| 多引擎串话 | 每个 agent 用 `launch --port auto` 后固定自己的 `--port N`；`engines` 核对 |
 | 工具/命令缺失 | 重载 IDE 窗口；或 `engine-editor-cli setup` 重新安装 skill + mcp.json |
 | 超时 | 看编辑器控制台 `[Live] id=...` 审计行（主线程可能被 modal 卡住） |

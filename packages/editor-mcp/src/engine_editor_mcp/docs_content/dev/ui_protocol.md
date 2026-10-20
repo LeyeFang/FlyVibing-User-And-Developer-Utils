@@ -220,7 +220,8 @@
 | `resource.find` | Resources 搜索 | — | D |
 | `resource.material.get` | 材质检视 / Inspector 材质区 | — | D |
 | `graph.list` | Node Editor 画布（同一 canvas 实例） | — | D |
-| `graph.add` | Add 菜单 | 画布出现节点 | D |
+| `graph.types` | Add 菜单目录 / 扩展节点包（只读发现） | — | D |
+| `graph.add` | Add 菜单 | 画布出现节点（不要求连线） | D |
 | `graph.link` | 引脚拖拽连线 | 画布连线、下游控件引用下拉更新 | D |
 | `graph.set_props` | 节点卡控件 | 卡片字段回显（引用型 props 联动见 §7） | D |
 | `graph.set_description` | 节点卡 Description 展开区 | 描述文本回显（空串=清除） | D |
@@ -400,10 +401,14 @@ SettingsPanel.unregister_pages_by_owner("ext_x")  # 扩展卸载保险丝（与 
 |---|---|---|---|
 | `ui.font_scale` | float | `CLAMPS` 0.7..1.6 | `EditorImguiLayer.apply_font_scale` → `style.font_scale_main` |
 | `ui.language` | 语言代码 | 由 `Locale/*.json` **动态推导**（未知/越界 → 默认 en；未 `ui_complete` 的草稿不在选项内） | `I18n.set_language`（协议 `i18n_protocol.md` §5） |
+| `server.port` | int | `INT_CLAMPS` 1024..65535；默认 8977 | 下次启动 `LiveCommandServer.start()`；env `MGE_EDITOR_MCP_PORT` 优先 |
 
 - **未知键 → `KeyError`**（不静默创建任意键）；非法数值 → 回默认；`set` 返回**定格值**。
-- 自由度标注：`Common` 页两项 = **L1 受控枚举**；`Export` 页模式 = L1、预设 = L0、宽高 = L2
-  （钳制委托 SimulationController）。
+- 自由度标注：`Common` 页字号/语言 = **L1 受控枚举**、Port = **L2 开放输入 + 钳制**；
+  `Export` 页模式 = L1、预设 = L0、宽高 = L2（钳制委托 SimulationController）。
+- 启动覆盖（`Application/Editor/StartupOptions.py`）与面板同键：`--port` / `--language` /
+  `--set k=v` / `--settings JSON`；只作用于本次进程，不写回 `settings.json`。
+  环境变量 `MGE_EDITOR_MCP_PORT` 仍优先于 `server.port`。
 
 ### 13.4 线程模型 + 字体管线（free-threaded 关键）
 
@@ -422,13 +427,14 @@ SettingsPanel.unregister_pages_by_owner("ext_x")  # 扩展卸载保险丝（与 
 | op | 语义 |
 |---|---|
 | `settings.get` | `{key?}` 省略 key = 全量；UI 同路径 = 面板自身（只读，D） |
-| `settings.set` | `{key, value}` → 校验+钳制 + 落盘 + **下一渲染帧**生效（D + Q） |
+| `settings.set` | `{key, value}` → 校验+钳制 + 落盘 + **下一渲染帧**生效（D + Q）；`server.port` 例外：下次启动才重建监听 |
 
-三方一致（§10 表 ↔ `ops.py` ↔ `_register_ops`）由 `test_action_contract.py` 守卫（55 op）。
+三方一致（§10 表 ↔ `ops.py` ↔ `_register_ops`）由 `test_action_contract.py` 守卫（60 op）。
 
 ### 13.6 测试
 
-`Test/Application/Editor/test_editor_settings.py`（core，39 checks）：默认值 / 落盘往返 / clamp /
+`Test/Application/Editor/test_editor_settings.py`（core，53 checks）：默认值 / 落盘往返 / clamp /
 枚举回退 / 未知键 KeyError / 损坏 JSON 容错 / pending 出队且只应用一次 / I18n 命中与回退 /
-页面注册表（重名、空 id、owner 清理、排序）/ `settings.*` op 行为链。
+页面注册表（重名、空 id、owner 清理、排序）/ `settings.*` op 行为链 /
+`server.port` 钳制与启动参数覆盖（`--port` / `--language` / `--set`）。
 

@@ -217,7 +217,7 @@ phase0 起点用 `TimeTrigger` 调用一次，不能接每帧 Update。
 ### Math (pure data, no exec)
 | type_name | input | output | props |
 |-----------|-------|--------|-------|
-| ScalarMath | In_0..In_7 (float) | Result | operation: sum/sub/mul/div |
+| ScalarMath | In_0..In_7 (float) | Result | operation: sum/subtract/multiply/divide (short aliases add/sub/mul/div accepted) |
 | Compare | A,B (variant), C (float, 可选) | Result(bool) | operation: gt/lt/eq/neq/gte/lte/and/or/not/xor/in/not_in(out)/between; between 半开区间 B<=A<C, include_end=true 时闭区间 |
 | MakeList | Item_0..Item_7 (variant, 可选) | List(variant) | — (纯数据: 跳过未连接槽位, 常用来给 in/not_in 提供候选集合) |
 | Constant | — | Result(float) | value: float |

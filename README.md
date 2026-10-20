@@ -13,9 +13,9 @@ FlyVibing Utils is the authoring and automation toolchain for [FlyVibingEngine](
 
 | Package | Entry points | Purpose | Editor required |
 |---|---|---|---|
-| **`editor-mcp`** | `engine-editor-cli`, `engine-editor-mcp` | Live editor control over the loopback command bus, available as a CLI and as an MCP server (lite/full profiles). | Yes |
-| **`node-editor`** | `flyvibing-node-editor` | Offline pipeline from experiment spec to graph JSON to `.scene` injection; includes a rules reference, validation, and static flow inspection. | No |
-| **`extension-kit`** | `flyvibing-review` | Static extension review and a headless Dear ImGui test harness. | No |
+| **`editor-mcp`** | `engine-editor-cli`, `engine-editor-mcp` | Live editor control through a CLI and MCP server. | Yes |
+| **`node-editor`** | `flyvibing-node-editor` | Offline node-graph authoring, validation, and scene injection. | No |
+| **`extension-kit`** | `flyvibing-review` | Static extension review and headless ImGui testing. | No |
 
 The `skills/` directory contains the source for the `engine-editor` and `node-graph` skills. The build synchronizes them into the `editor-mcp` and `node-editor` packages. `engine-editor-cli setup` installs the `engine-editor` skill and MCP configuration; the `node-graph` skill ships with `node-editor`.
 
