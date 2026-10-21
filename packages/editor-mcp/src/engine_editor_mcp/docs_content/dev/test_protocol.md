@@ -24,6 +24,15 @@ python Utils/Dev/test_runner.py --tier all --json     # 末行 JSON 摘要（机
 # UI 场景回放（真实面板 + 快照 PNG）
 python Test/Application/Editor/ui_scenario.py scenarios/panels_smoke.py
 python Test/Application/Editor/ui_scenario.py --preview          # 交互预览（ESC 退出）
+# scenarios 已由 runner 自动发现，--tier gui 会逐个通过 ui_scenario.py 执行
+python Utils/Dev/test_runner.py --tier gui
+
+# 测试节点 / UI 展开图（agent 定位相关测试/控件）
+python Utils/Dev/test_map.py check
+python Utils/Dev/test_map.py affected Application/Core/Scene/SceneManager.py
+python Utils/Dev/test_map.py ui tree
+python Utils/Dev/test_map.py ui check
+python Utils/Dev/test_map.py ui affected Application/Editor/UI/panels/ScenePanel.py
 ```
 
 运行器输出示例（agent 只读这几行 + 失败行）：
@@ -104,9 +113,10 @@ SUMMARY: 11/12 passed in 84s | failed: test_x | tier=core | skipped=5 | runs: Te
 | 设备别名（跨机器迁移） | `Test/Application/Functions/test_device_alias.py` | core | 两级设备身份：`DeviceRegistry` 增删改查/原子落盘/损坏容错/名称校验 + `resolve_port`（`@name`→物理 / 未绑定显式错 / 空端口 ValueError）+ `send`/`start_watch` 入队前解析 + `SerialSend` 求值器（空端口/未绑定别名 → 显式 error 日志，不再默认 COM1）+ 校验规则 13 warning + `ext.device.{bind_alias,bind_nodes}`（面板按钮同一实现，dry_run）；注册表用 `MGE_DEVICES_FILE` 沙箱；协议 `device_io_protocol.md` §10 |
 | Utils 布局（受众×分发命运） | `Test/Application/Editor/test_utils_layout.py` | core | 顶层白名单（Dev/ExtDev/User）+ `Utils/User` 登记制（运行时最小面）+ **ExtDev 禁 import `Application.Editor`**（`Application.*` 仅白名单 `Application.Core.NodeGraph`）+ **导出行为断言**（`dist/tmp/__pycache__` 不进游戏包 — 真调 `_copy_tree_for_export`）+ 工具 README 齐备 + **skills 双副本字节一致**；词表 `Utils/README.md` |
 | 组件字段钳制 | `Test/Application/Core/test_component_clamps.py` | core | `FIELD_CLAMPS` 单元（标量/tuple/int/bool/无规则）+ Inspector(`SceneBrowserController.set_component_field`)/MCP(`_op_component_set`) 两条写入路径 + 旧名迁移 (`get/add/set`)；单一权威 `ComponentRegistry.FIELD_CLAMPS`（Light/Camera/Transform/MediaPlayer/TextDisplay） |
-| Action 契约（GUI↔op） | `Test/Application/Editor/test_action_contract.py` | core | `ui_protocol.md` §10 映射表 ↔ `ops.py` ↔ `LiveCommandServer._register_ops()` 三方集合相等（59; 解析器在下一章标题处停止）+ 映射行列完整性 + 选中链行为（gizmo 状态机/自动选中/级联清理/场景切换清选中）；背景: `select_with_gizmo` 静默 NameError 修复（2026-10-08） |
+| Action 契约（GUI↔op） | `Test/Application/Editor/test_action_contract.py` | core | `ui_protocol.md` §10 映射表 ↔ `ops.py` ↔ `LiveCommandServer._register_ops()` 三方集合相等（60; 解析器在下一章标题处停止）+ 映射行列完整性 + 选中链行为（gizmo 状态机/自动选中/级联清理/场景切换清选中）；背景: `select_with_gizmo` 静默 NameError 修复（2026-10-08） |
 | agent 通道包 | `Test/Application/Editor/{test_editor_mcp_package,test_node_editor_mcp}.py` | core | wheel/CLI/注册表 |
-| UI 场景回放 | `Test/Application/Editor/scenarios/` | gui | 快照 + 行为断言（panels_smoke / menu_smoke / node_editor_smoke） |
+| UI 场景回放 | `Test/Application/Editor/scenarios/` | gui | 快照 + 行为断言（panels_smoke / menu_smoke / node_editor_smoke / node_editor_clip_smoke）；已由 `test_runner --tier gui` 自动发现 |
+| 测试节点 / UI 展开图 | `Doc/Dev/test_nodes.{json,md}` + `Doc/Dev/ui_map.{json,md}` + `Utils/Dev/test_map.py` | — | `test_map.py check`、`affected`、`ui tree/check/render`；`test_test_map.py` + `test_ui_map.py` 守卫引用完整性 |
 | ~~UI 面板/gizmo（遗留交互 demo）~~ | ~~`test_*_{opengl,zengl}.py`~~ | — | **2026-10-05 已清理**（18 个交互 demo 删除; 覆盖转入 scenarios + e2e） |
 | 实机 E2E | `Test/Application/Editor/e2e_*.py` + `Test/Application/Extensions/e2e_*.py` | live | 需编辑器运行中（例: `e2e_renderer_check` — 渲染快照 + 裸帧像素采样） |
 | 线程压力/边界 | `Test/Application/stress/` + `Core/test_thread_boundary.py` | core | `--stress N` 放大; 协议 `threading_protocol.md` |

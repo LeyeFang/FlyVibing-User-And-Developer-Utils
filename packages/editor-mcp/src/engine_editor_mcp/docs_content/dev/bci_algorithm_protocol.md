@@ -16,7 +16,7 @@
 | `BCIAlgorithm/CCA.py` | 典型相关分析（SSVEP 免训练判别） |
 | `BCIAlgorithm/Jobs.py` | SyncJob — 同步等待式训练任务（线程 + 锁槽） |
 | `Core/NodeGraph/node_types/{epoch,bci_algorithm}.py` | 节点类型（pins / props 文档） |
-| `Core/NodeGraph/evaluators/{epoch,bci_algorithm}.py` | 求值器（键规则 / 干跑 / 训练阻塞语义） |
+| `Application/Functions/BCIAlgorithm/{evaluator,evaluator_epoch}.py` | 求值器（键规则 / 干跑 / 训练阻塞语义；2026-10-21 从核心迁入扩展） |
 | 测试 | `Test/Application/Functions/test_{epoch_dataset,bci_algorithm,bci_empty_data}.py` |
 
 ## 2. 数据模型（EpochDataset — 神经工程学口径）

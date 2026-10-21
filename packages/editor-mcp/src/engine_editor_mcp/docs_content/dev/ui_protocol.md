@@ -17,7 +17,8 @@
 | `Application/Editor/I18n.py` | **UI 文案表服务**（目录驱动：`t(key)` 当前语言 → en → 键名；`register_catalog` 扩展语言包）— 协议 `Doc/Dev/i18n_protocol.md` |
 | `Application/Editor/Locale/*.json` | **语言目录**（单一事实源；`en` = 源语言；非 en 需 `ui_complete=true` 才进设置选项）— 同上协议 |
 | `Application/Editor/UI/panels/MenuBarPanel.py` | 主菜单栏面板（**当前未注册**，保留文件 — 见 `GUI_STRUCTURE.md`）；View 菜单 = 面板开关 + Show Grid（`toggle_grid_visible` 动作单点 → `Grid.set_visible`，与 `view.set_grid` op 同路径）；Extensions 段与 UIManager 共用 `ExtensionMenu.draw_extensions_menu` |
-| `Application/Editor/UI/panels/node_editor/panel.py` | `NodeEditorPanel`：画布渲染、Add 菜单、连线创建、Delete 删除（含级联）、Rearrange 自动布局、Import/Export（经 `Application/Core/NodeGraph/graph_io` 与 agent ops 同源） |
+| `Application/Editor/UI/panels/node_editor/panel.py` | `NodeEditorPanel`：画布渲染、Add 菜单、连线创建、Delete 删除（含级联）、组感知 Rearrange、Find Node 查询窗口、Groups 嵌套组窗口、Import/Export（经 `Application/Core/NodeGraph/graph_io` 与 agent ops 同源） |
+| `Application/Editor/UI/panels/node_editor/group_layout.py` | 纯数据组布局：组成员/父子关系、组框包围盒、递归组布局；无 imgui 依赖 |
 | `Application/Editor/UI/panels/node_editor/widgets/` | 节点内联控件包 — 注册表在 `core.py`（`@register`）；子模块 flow_io / entity_comp / device_siggen / device_pool / epoch / algorithm，**import 即注册**；设备共用助手在 `device_common.py` |
 | `Application/Editor/UI/panels/node_editor/visible_pins.py` | 引脚可见性规则注册表（`@rule(node_type)`） |
 | `Application/Editor/UI/panels/node_editor/styling.py` | `MENU_SECTIONS`（Add 菜单数据）、`LINK_COLORS`（按 data_type 着色）、node style 颜色 |
@@ -94,11 +95,22 @@
 
 ## 4. 自动布局（Rearrange）与卡片高度
 
-`panel._auto_layout` 需要估算每张卡的高度：`V_HEADER + pins*V_PER_PIN (+V_WIDGET_EXTRA)`。
+`panel._auto_layout` 现在委托 `group_layout.GroupLayoutEngine`：
 
-- **新增带内联控件的节点类型，必须加入 `panel.py` 的 `_WIDGET_NODES` 集合**，
-  否则 Rearrange 后卡片重叠。
+- 顶层组是一个布局单元；组内直接节点 + 子组递归布局（子组先量尺寸，父组再分配空间）。
+- 外部节点连到组时，组与节点按拓扑层级相邻排开；旧“只排节点”算法会把组挤到节点之间，已废弃。
+- 组框位置/尺寸由 `group_bounds()` 从成员包围盒推导；拖动组框平移整棵成员子树。
+- `Rearrange Group` 只重排该组，然后回流父组/祖先；`Fit Group` 用 `navigate_to_selection` 只框住该组。
+- 卡片高度估算仍在 `group_layout.node_size()`：`V_HEADER + pins*V_PER_PIN (+V_WIDGET_EXTRA)`。
+- **新增带内联控件的节点类型，必须同步 `group_layout.WIDGET_TYPES`**，否则 Rearrange 后卡片重叠。
 - 卡片高度 ≈ pin 行数 × 24px 与控件高度取大者；控件行数多（如 `InitSigGenDevice`）时宁可留白。
+
+节点查询窗口（2026-10-21）:
+
+- 工具栏 `Find Node` 与 `Add Node` 同级；窗口顶部搜索栏、中部结果列表、底部 `Go To` / `Delete`。
+- 搜索匹配 alias / type / label / description；结果按 alias 前缀优先排序。
+- `Go To` 调用 `center_node_on_screen`（缺失时回退 `navigate_to_selection`）；`Delete` 删除节点及其连线。
+- 场景守卫：`Test/Application/Editor/scenarios/node_editor_find.py`。
 
 ---
 
@@ -437,4 +449,28 @@ SettingsPanel.unregister_pages_by_owner("ext_x")  # 扩展卸载保险丝（与 
 枚举回退 / 未知键 KeyError / 损坏 JSON 容错 / pending 出队且只应用一次 / I18n 命中与回退 /
 页面注册表（重名、空 id、owner 清理、排序）/ `settings.*` op 行为链 /
 `server.port` 钳制与启动参数覆盖（`--port` / `--language` / `--set`）。
+
+## 14. UI 展开图（控件归属速查）
+
+> 事实源：`Doc/Dev/ui_map.json`；人读版：`Doc/Dev/ui_map.md`（自动生成）。
+> 地图只描述 UI 结构/显隐/归属/关联测试，不复制 op 参数定义；action 契约仍以 §10 为准。
+
+```powershell
+python Utils/Dev/test_map.py ui tree
+python Utils/Dev/test_map.py ui show editor.panel.scene
+python Utils/Dev/test_map.py ui affected Application/Editor/UI/panels/ScenePanel.py
+python Utils/Dev/test_map.py ui tests editor.panel.scene
+python Utils/Dev/test_map.py ui coverage
+python Utils/Dev/test_map.py ui check
+python Utils/Dev/test_map.py ui render
+```
+
+- 每个 control 记录：`id / label / kind / parent / owner / source / visible_when / actions /
+  opens / tests / scenarios`；`visible_when` 只能引用 `states` 中的状态。
+- `agent_only` 列出没有 GUI 入口的诊断 op（例如渲染器/线程快照、内部抓帧）；
+  `ui coverage` 要求其余 public op 至少有一个 control 映射。
+- **UI 开发 DoD**：改控件/显隐/菜单项时，同步更新 `ui_map.json`，必要时补 `scenarios/*.py`
+  与测试节点，然后运行 `ui render`、`ui check`、`test_runner --tier gui`；
+  `test_ui_map.py` 在 core 批次守卫 source/test/scenario/action 引用。
+- GUI 场景已由 runner 自动发现：`python Utils/Dev/test_runner.py --tier gui`。
 

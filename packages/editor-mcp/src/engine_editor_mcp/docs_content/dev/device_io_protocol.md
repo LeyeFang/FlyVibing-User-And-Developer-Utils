@@ -13,7 +13,7 @@
 | `Application/Functions/VirtualDevice/` | 设备模块（会话注册表 + 后端协议 + 环形缓冲 + 服务进程 + 面板扩展） | `Device.py`（后端无关：配置/缓冲/会话/注册表/落盘）、`ServiceProtocol/ServiceHost/ServiceClient.py`（服务进程通信，见 §7）、`SigGen.py`（虚拟信号发生器后端）、`service.py`（服务入口）、`extension.py`（面板）、`__init__.py`（门面路由; 2026-10-16 EEGDevice 并迁） |
 
 共同约束：
-- **不得反向依赖 Engine / Editor**；被求值器（`Application/Core/NodeGraph/evaluators/*`）调用。
+- **不得反向依赖 Engine / Editor**；被求值器（核心 `Application/Core/NodeGraph/evaluators/*` 或扩展目录 `Application/Functions/VirtualDevice/evaluator_*.py`）调用。
 - 门面 API 返回 `(ok, detail)` / `(result, detail)`，**不向上抛异常**（求值器把它转为 error 日志）。
 - 真实不可用（驱动缺失/设备未连）→ 明确报错 + 优雅降级，**绝不静默伪造数据**。
 

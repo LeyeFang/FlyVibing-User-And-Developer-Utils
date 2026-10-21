@@ -72,7 +72,7 @@ scene 文件格式（`{"scene": {"node_graph": ...}}`）由 `extract_graph_data`
 - fake-time: 默认 `dt=1/60`、`frames=360`（6s 模拟），逐帧 `trigger("OnFrameUpdate")`，前后触发 `OnGameStart` / `OnGameStop`；
 - **确定性**: 开始时重置全局随机种子（`evaluators.math.seed_global_rng(seed)`, 默认 0）——同图同参 → 同日志；
 - **副作用隔离**: `ExecutionContext.dry_run=True`（设备走 stub 后端、实体/IO 副作用转 emit_log）；
-- **会话隔离**: 干跑中的设备会话统一 `dryrun#` 前缀（`evaluators/siggen.py`）；设备池共用同一命名空间（`evaluators/device_pool.py`），任务结束自动 `kill_device` + `destroy_pool` 清理；
+- **会话隔离**: 干跑中的设备会话统一 `dryrun#` 前缀（`Application/Functions/VirtualDevice/evaluator_siggen.py`）；设备池共用同一命名空间（`evaluator_pool.py`），任务结束自动 `kill_device` + `destroy_pool` 清理；
 - **取消**: `cancel_event` 帧间检查 → 报告 `state="cancelled"`；
 - ExitGame 被触发时提前收敛（记录 `exit_game_frame`）。
 

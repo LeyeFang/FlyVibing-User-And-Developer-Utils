@@ -16,7 +16,7 @@
 |---|---|---|
 | 数据模型 | `Application/Core/NodeGraph/data_model.py` | `PinDef` / `NodeTypeDef` / `NodeInstance` / `LinkInstance`（无 imgui 依赖） |
 | 类型注册表 | `Application/Core/NodeGraph/node_types/*.py` | 每文件一类；`_reg()` 注册进 `_TYPES`；颜色常量在 `node_types/__init__.py` || 扩展节点包 | `Application/Core/NodeGraph/node_packs.py` + `Application/Functions/**/node_pack.py` | 自动发现/运行期注册；type/menu/evaluator/fields 增量注册 || 执行引擎 | `Application/Core/NodeGraph/evaluator_engine.py` | `ExecutionContext`（pin/var/timer/dry_run/**宿主注入**）、`GraphEvaluator`（exec 遍历 + 懒求值）、`_EVALUATORS` 注册表 |
-| 求值器 | `Application/Core/NodeGraph/evaluators/*.py` | 每文件一域；`register_evaluator()`；导入触发在 `Application/Core/NodeGraph/__init__.py` |
+| 求值器 | 核心 `Application/Core/NodeGraph/evaluators/*.py`；扩展 `Application/Functions/<id>/evaluator*.py` | 每文件一域；`register_evaluator()`；核心模块在 `Core/NodeGraph/__init__.py` 导入，扩展由 `node_pack.py` 注册 |
 | 画布 | `Application/Core/NodeGraph/canvas.py` | `NodeCanvas`：节点/连线 CRUD、`pin_ids` 实例化、序列化（**存档契约**） |
 | 图约束 | `Application/Core/NodeGraph/graph_constraints.py` | 跨节点联动（删除级联 + 静态校验函数）；纯数据、无 imgui |
 | 场景内嵌文档 | `Application/Core/NodeGraph/graph_rules.py` | `_NODE_GRAPH_RULES`，每次导出 scene 时附带（外部 agent 读） |
@@ -43,7 +43,8 @@
   离线工具 `set_description` / `add_node.description` 同样支持。
 - `NodeCanvas.node_groups: dict` — 节点组元数据（tools 层宏的记账：`type/alias/params/
   members/chain_members/arm_members/slots/parent/children`；规范见工具仓 `node_groups.py` + `rules.md`）。
-  引擎**只做不透明保留**，不参与求值；空 dict 不写入 JSON。
+  运行时/校验**不参与求值**；编辑器读取元数据绘制组框、支持拖动、嵌套组和组感知布局
+  （`panels/node_editor/group_layout.py`）。空 dict 不写入 JSON。
 - `clear()` 同时清空组；`replace_from()` 整块复制（导入/切场景不丢组）。
 - `graph.list` 快照：节点带 `alias` / `description`（非空时），顶层带 `node_groups` 摘要
   （`type/alias/version/arms/members/parent/children/slots`）；`graph.export` 走 `to_dict()`，元数据随图落盘。
@@ -129,6 +130,16 @@
 `container` 不生成执行节点，只包已有子组：参数 `children`、可选 `entry`/`done`
 （节点 pin 引用）与 `members`；子组 `set_group` 重展开后容器成员自动刷新。
 
+编辑器侧组编辑（2026-10-21）:
+
+- 组框由成员包围盒推导；拖动组框 = 平移整棵成员子树（父组拖动会跳过子组的重复拖动）。
+- `Rearrange` 使用组感知布局：顶层组是一个布局单元，组内直接节点 + 子组递归布局；
+  外部节点连到组时，组与节点按层级相邻排开，不再被旧“只排节点”算法挤扁。
+- `Rearrange Group` 先重排组内，再回流父组/祖先，保证子组尺寸变化后不与兄弟组重叠。
+- `Groups` 窗口按 `parent/children` 显示嵌套树；`Fit Group` 只把该组成员纳入视野。
+- `Find Node` 窗口按 alias / type / label / description 搜索；`Go To` 居中节点，`Delete`
+  删除节点（不走求值器）。
+
 ---
 
 ## 3. 新增节点完整清单（10 步，缺一不可）
@@ -194,7 +205,7 @@ if ctx.dry_run:
   （`validate_graph` 汇总 `events_by_type` / `by action`，测试可断言）。
 - **禁止**在干跑中：开线程、开设备、写文件、改真实场景、导入重依赖。
 - 真实模式失败要**记录并继续**（`emit_log(..., "error", ...)` + print），不得向上抛异常
-  （否则整帧执行中断）。参考 `evaluators/siggen.py` + `Application/Functions/VirtualDevice` 空跑后端的写法。
+  （否则整帧执行中断）。参考 `Application/Functions/VirtualDevice/evaluator_siggen.py` + 空跑后端的写法。
 - 纯数据节点（如 GetSigGenData）干跑中只有在输出**被读取**时才会求值 —— 测试/校验图要保证
   至少有一条数据连线消费它的输出，否则不会出现在干跑事件里。
 
