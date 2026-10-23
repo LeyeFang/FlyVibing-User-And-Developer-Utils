@@ -111,7 +111,13 @@ English: each agent launches its own editor with an auto-selected port; the MCP 
 | `view.set_mode` | `editor_switch_2d` / `editor_set_scene_type` | `{"mode": "2d"\|"3d"\|"overlay"}` | **Scene Type 按钮完整语义**：`set_game_type`（决定 PIE 用哪台摄像机）+ 视口切换 | `{mode, label, game_type}` |
 | `view.set_grid` | — | `{"visible": bool}` | **View 菜单 Show Grid 同路径**（`Grid.set_visible`；注销/重注册 overlay，幂等，缺参数报错） | `{visible}` |
 | `ui.panels` | — | `{}` | 列出编辑器面板（内置 + 扩展窗口）及 `visible/kind/ext_id` — panel 发现入口 | `{panels, count, visible}` |
-| `ui.panel` | — | `{"name", "visible"? , "toggle"?}` | 读/写单个面板显隐（等同 View 菜单勾选；省略 visible/toggle = 只读；未知面板 → 受控错误并列出候选） | `{name, visible, changed, kind, ext_id}` |
+| `ui.panel` | — | `{"name", "visible"? , "toggle"?}` | 读/写单个面板显隐（等同 View 菜单勾选；省略 visible/toggle = 只读；未知面板 → 受控错误并列出候选）。`Node Editor` 额外返回 `view` 诊断（canvas_w/zoom/mouse/selected_nodes/box/nodes/groups） | `{name, visible, changed, kind, ext_id, view?}` |
+| `ui.mouse` | — | `{"x", "y"}` | 移动真实 GLFW 光标 + ImGui 事件（聚焦编辑器窗口）；用于 hover/点击回归 | `{x, y, frame}` |
+| `ui.mouse_button` | — | `{"down", "button"?, "x"?, "y"?}` | 按下/抬起鼠标键（0/1/2 = 左/右/中） | `{button, down, frame}` |
+| `ui.click` | — | `{"x", "y", "button"?}` | 跨 3 帧完成移动→按下→抬起；配合 `engine_capture` 观察真实 UI | `{scheduled, frames, pending}` |
+| `ui.drag` | — | `{"x0","y0","x1","y1","steps"?, "button"?}` | 逐帧拖拽（默认 8 步）；用于拖分隔条/框选/拖节点 | `{scheduled, frames, pending}` |
+| `ui.wheel` | — | `{"dy", "dx"?}` | 滚轮（节点画布缩放 / 列表滚动） | `{dx, dy, frame}` |
+| `ui.key` | — | `{"key", "down"?}` | 按下/抬起键盘键（escape/delete/… 或 ImGui key code） | `{key, down, frame}` |
 | `threads.snapshot` | — | — | **线程注册表快照**（注册/未注册漂移/停滞判定；协议 `threading_protocol.md`，工具 `Utils/Dev/thread_probe.py` 同源） | `{registered, unregistered, stale, count}` |
 | `renderer.snapshot` | — | — | **渲染器状态快照**（后端 / GL 信息 / 资源计数 / 视口 / 帧统计；协议 `rendering_protocol.md`；无头时 `available=false`） | `{available, backend, gl, viewport, counts, overlays, stats}` |
 | `camera.get` | `editor_camera_get` | `{"role": "3d"\|"2d"\|"overlay"}` | 读场景摄像机实体（Transform + Camera） | `{position, rotation, projection, ...}` |

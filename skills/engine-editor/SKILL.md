@@ -58,6 +58,12 @@ engine-editor-cli call graph.types owner=device              # 发现扩展节�
 engine-editor-cli call graph.add type=SerialSend             # 只建节点不连线（节点池）
 engine-editor-cli call ui.panels                            # 面板发现（名称 + visible + kind）
 engine-editor-cli call ui.panel name="Node Editor" visible=true   # 打开/关闭面板（View 菜单同路径；闭环）
+engine-editor-cli call ui.panel name="Node Editor"          # Node Editor 额外返回 view: canvas_w/zoom/selected_nodes/nodes 屏幕矩形
+engine-editor-cli call ui.mouse x=640 y=360                 # 移动鼠标（UI 点击/悬停回归）
+engine-editor-cli call ui.click x=640 y=360                  # 真实点击（跨 3 帧）
+engine-editor-cli call ui.drag x0=500 y0=300 x1=900 y1=300 steps=12  # 拖拽（跨帧）
+engine-editor-cli call ui.wheel dy=3                        # 滚轮（节点画布缩放）
+engine-editor-cli call ui.mouse_button down=true button=0   # 手动按下/抬起（配合 ui.mouse）
 engine-editor-cli batch ops.json             # [{"op":...,"args":{...}}, ...]（- = stdin）
 engine-editor-cli exec build_scene.py        # 脚本模式（见 §4）
 engine-editor-cli validate                   # 干跑校验（默认 summary）
@@ -85,6 +91,7 @@ engine-editor-cli doc tools              # 开发工具索引（test_runner / th
 | `view.set_mode` | 场景类型 3d/2d/overlay（影响 PIE 摄像机） |
 | `view.set_grid` | 显示/隐藏视口网格（View 菜单 Show Grid 同路径; visible=true/false） |
 | `ui.panels` / `ui.panel` | 面板发现 / 打开关闭（等同 View 菜单勾选；`visible`/`toggle` 写入后回真实状态；扩展窗口同样适用） |
+| `ui.mouse` / `ui.mouse_button` / `ui.click` / `ui.drag` / `ui.wheel` / `ui.key` | 向编辑器窗口注入真实输入（屏幕坐标；`click`/`drag` 跨帧执行）。用于点击/框选/拉伸面板后截图验证 |
 | `threads.snapshot` | 线程注册表快照（配合 `Utils/Dev/thread_probe.py` 探针; 见 threading_protocol.md） |
 | `renderer.snapshot` | 渲染器状态快照（GL 信息/资源计数/视口/帧统计; 无头时 available=false） |
 | `entity.add` / `entity.list` / `entity.get` | 实体新建/列举/详情（id/name 寻址） |

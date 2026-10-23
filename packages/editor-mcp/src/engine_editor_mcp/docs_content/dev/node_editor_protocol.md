@@ -41,8 +41,10 @@
   `to_dict()` 省略空描述；GUI 节点卡 **Description** 可展开/收起并直接编辑；
   `graph.list` 返回、`graph.set_description` 读写（省略参数=读，空串=清除）；
   离线工具 `set_description` / `add_node.description` 同样支持。
-- `NodeCanvas.node_groups: dict` — 节点组元数据（tools 层宏的记账：`type/alias/params/
-  members/chain_members/arm_members/slots/parent/children`；规范见工具仓 `node_groups.py` + `rules.md`）。
+- `NodeCanvas.node_groups: dict` — 节点组元数据（tools 层宏的记账：`type/alias/description/params/
+  members/chain_members/arm_members/slots/parent/children/io_nodes`；规范见工具仓 `node_groups.py` + `rules.md`）。
+  `description` 显示在组标题下方；`io_nodes.start/end` 指向组自动维护的
+  `GroupStart`/`GroupEnd` 普通节点 ID。
   运行时/校验**不参与求值**；编辑器读取元数据绘制组框、支持拖动、嵌套组和组感知布局
   （`panels/node_editor/group_layout.py`）。空 dict 不写入 JSON。
 - `clear()` 同时清空组；`replace_from()` 整块复制（导入/切场景不丢组）。
@@ -130,15 +132,56 @@
 `container` 不生成执行节点，只包已有子组：参数 `children`、可选 `entry`/`done`
 （节点 pin 引用）与 `members`；子组 `set_group` 重展开后容器成员自动刷新。
 
-编辑器侧组编辑（2026-10-21）:
+编辑器侧组编辑（2026-10-22 更新）:
 
-- 组框由成员包围盒推导；拖动组框 = 平移整棵成员子树（父组拖动会跳过子组的重复拖动）。
+- 组框几何持久化在 `node_groups[gid]["box"] = {x,y,w,h}`（画布坐标），
+  `min_box = {w,h}` 记录成员包围盒 + margin 的下限；**不要每帧从成员包围盒推导**。
+- 成员拖入：按鼠标松开的画布坐标命中组框，加入 `members`，组框只扩不缩；
+  拖出：移出所有组，旧组收紧并重算 `min_box`。父组通过子组 `box` 递归覆盖。
+- 右下角 `+` 手柄缩放：成员 position 按新旧 box 比例移动；
+  不能缩到 `min_box` 以下。`Group(size)` 只在首次使用 size，之后必须
+  `SetGroupSize(NodeId, size)` 才会改变可视框。
+- 组标题/别名：Groups 窗口 `Group name` 输入、右键 `Rename Group`，或双击
+  组标题内联编辑 → `rename_group` → `params/alias`；标题画在组框内部左上角。
+  `Description` 输入/双击描述行内联编辑 → `node_groups[gid]["description"]`，
+  显示在标题下方；标题行 `Description`/`Hide description` 按钮可折叠，
+  默认展开；空描述显示浅色占位 `Double-click to add description...`。
+- 组 exec in/out：组节点不能直接挂 Pin（imgui-node-editor 断言），改为每个组
+  自动维护两个**真实普通节点**：`GroupStart`（只有 `exec_out`）和
+  `GroupEnd`（只有 `exec_in`）。节点 ID 存在 `node_groups[gid]["io_nodes"]`，
+  同时属于组 `members`；创建/加载时补齐，Ungroup/Delete/Destroy 时移除。
+  编辑器把这两个节点渲染为组框左右端口槽内的紧凑 **Group entry / Group exit**
+  pill（不是普通节点卡片）；视觉标签表示组边界角色，不代表内部 pin 方向；
+  pin 内容里带 `●` 并把 `pin_pivot_alignment` 对齐到
+  pill 外缘，连线锚点才不会落到 pill 底部中心。PinId 仍是真实节点 pin。
+  **不隐藏成员 Pin，也不改写 `slots`**；入口出口可自由拖到组内任意成员。
+  组框左右各留 100px 端口槽（`MARGIN_LEFT/RIGHT` = `PAD_LEFT/RIGHT`），
+  旧组框按 `GROUP_LAYOUT_VERSION` 只扩容迁移。
+- 拖动组框 = 平移整棵成员子树（父组拖动会跳过子组的重复拖动）。
 - `Rearrange` 使用组感知布局：顶层组是一个布局单元，组内直接节点 + 子组递归布局；
   外部节点连到组时，组与节点按层级相邻排开，不再被旧“只排节点”算法挤扁。
 - `Rearrange Group` 先重排组内，再回流父组/祖先，保证子组尺寸变化后不与兄弟组重叠。
 - `Groups` 窗口按 `parent/children` 显示嵌套树；`Fit Group` 只把该组成员纳入视野。
+- **Fit 时机**：`graph.fit`/工具栏 Fit 必须在节点与组框绘制之后执行
+  `NavigateToContent()`；组框 `SetGroupSize` 写入本帧原生尺寸前 Fit 会把新导入组
+  缩到极小。E2E 见 `Test/Application/Editor/test_e2e_node_group_live.py`。
 - `Find Node` 窗口按 alias / type / label / description 搜索；`Go To` 居中节点，`Delete`
   删除节点（不走求值器）。
+- **组标题**：按 imgui-node-editor 官方顺序先画标题、再 `Group(size)`；标题贴在组框上沿，
+  不再用 `set_cursor_pos` 按窗口坐标拉回（会把标题漂到画布空白处）。
+- **多选**：Shift+click 累加节点；框选使用编辑器自有屏幕矩形命中（canvas→screen），
+  只选择真实节点，不把组框 NodeId 纳入选择。节点编辑器内 `get_mouse_pos()` 是画布坐标，
+  自定义命中前统一转成 `_mouse_screen`；组框内部是“洞”，只有标题/边框算组框命中。
+- **右键**：单选节点 → `Delete Node`；多选节点/多选背景 → `Delete Nodes` / `Merge into Group`；
+  选中组框 → `Rename Group` / `Edit Description` / `Ungroup` / `Destroy Group`；
+  空白且无选择 → 浅色 `No selected node`（菜单始终打开，不再静默返回）。
+  `Destroy Group` 删除组框、子组和全部成员节点；`Ungroup` 只拆框保留节点；
+  `graph.group.delete` 是工具兼容的“只删组框”语义。
+- **Groups 窗口**也提供 `Ungroup` / `Destroy Group`（全删）；`Group name` 与
+  `Description` 两个输入分别写 `alias` / `description`。
+- 组操作要求选择完整覆盖已有组；部分覆盖会拒绝（避免同一节点落在两个同级组）。
+- CLI：离线 `group-merge / group-ungroup / group-delete`（默认 dry-run，`--write` 落盘）；
+  live：`graph.group.merge / graph.group.ungroup / graph.group.delete / graph.group.destroy`。
 
 ---
 

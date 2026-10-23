@@ -542,6 +542,38 @@ def test_group_linear_templates() -> None:
     check("validate linear update: no errors", not errs, str(errs[:3]))
 
 
+def test_group_merge_delete() -> None:
+    print("-- group merge / ungroup / delete --")
+    g = GraphBuilder()
+    a = g.node("Constant", ["Result"], {"value": 1})
+    b = g.node("Constant", ["Result"], {"value": 2})
+    scene = g.build()
+
+    r = apply_ops(scene, [{"op": "merge_group", "nodes": [a, b]}])
+    check("merge_group ok", r["ok"], str(r["errors"]))
+    groups = r["scene"].get("node_groups") or {}
+    gid = next(iter(groups), "")
+    check("merge_group creates gid", bool(gid), str(groups))
+    check("merge_group members",
+          sorted(groups[gid].get("members") or []) == sorted([a, b]), str(groups))
+
+    r2 = apply_ops(r["scene"], [{"op": "merge_group", "nodes": [a, b]}])
+    check("already grouped rejected", not r2["ok"], str(r2["errors"]))
+
+    r = apply_ops(r["scene"], [{"op": "ungroup_group", "group": gid}])
+    check("ungroup_group ok", r["ok"], str(r["errors"]))
+    check("ungroup_group removes frame", not (r["scene"].get("node_groups") or {}))
+    check("ungroup_group keeps nodes",
+          str(a) in (r["scene"].get("nodes") or {}) and str(b) in (r["scene"].get("nodes") or {}))
+
+    r = apply_ops(r["scene"], [{"op": "merge_group", "nodes": [a, b]}])
+    gid2 = next(iter(r["scene"].get("node_groups") or {}), "")
+    r = apply_ops(r["scene"], [{"op": "delete_group", "group": gid2}])
+    check("delete_group ok", r["ok"], str(r["errors"]))
+    check("delete_group keeps nodes",
+          str(a) in (r["scene"].get("nodes") or {}) and str(b) in (r["scene"].get("nodes") or {}))
+
+
 def main() -> int:
     test_alias()
     test_group_add()
@@ -550,6 +582,7 @@ def main() -> int:
     test_group_window()
     test_group_hide_container()
     test_group_linear_templates()
+    test_group_merge_delete()
     print(f"\n{_RESULTS['pass']} passed, {_RESULTS['fail']} failed")
     return 0 if _RESULTS["fail"] == 0 else 1
 

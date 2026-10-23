@@ -9,6 +9,9 @@
   python -m flyvibing_node_editor.cli pins  [TypeName]
   python -m flyvibing_node_editor.cli find  --scene scene.scene [--type T] [--alias NAME] [--prop K=V ...]
   python -m flyvibing_node_editor.cli groups [--scene scene.scene]
+  python -m flyvibing_node_editor.cli group-merge --scene scene.scene --nodes 2,3 [--alias NAME] [--write]
+  python -m flyvibing_node_editor.cli group-ungroup --scene scene.scene --group g1 [--write]
+  python -m flyvibing_node_editor.cli group-delete --scene scene.scene --group g1 [--no-recursive] [--write]
   python -m flyvibing_node_editor.cli apply-ops --scene scene.scene --ops ops.json [--write]
 
 - `rules` 无 section → 目录（outline）; 有 section → 单节文本; `--all` → 全文;
@@ -193,6 +196,61 @@ def cmd_apply_ops(ns) -> int:
         "path": scene_path,
     })
     return 0 if ok else 1
+
+
+def _run_group_op(ns, op: dict) -> int:
+    """执行单个组 op（dry-run 默认；--write 才写回 scene）。"""
+    from flyvibing_node_editor.engine_path import ensure_engine_importable
+
+    ensure_engine_importable()
+    scene_path = _resolve(ns.scene)
+    if not os.path.exists(scene_path):
+        return _fail(f"scene not found: {scene_path}", 1)
+    try:
+        with open(scene_path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as e:
+        return _fail(f"scene 读取失败: {e}", 1)
+
+    from flyvibing_node_editor.node_graph_validator import check_graph
+    from flyvibing_node_editor.ops import apply_ops
+
+    result = apply_ops(data, [op])
+    entries = check_graph(result["scene"]) if result["ok"] else []
+    val_errors = [e for e in entries if e["level"] == "error"]
+    ok = bool(result["ok"]) and not val_errors
+    if ns.write and result["ok"]:
+        with open(scene_path, "w", encoding="utf-8") as fh:
+            json.dump(result["scene"], fh, indent=2, ensure_ascii=False)
+    _out({
+        "ok": ok,
+        "op": op.get("op"),
+        "errors": result["errors"],
+        "validation_errors": [e["message"] for e in val_errors[:5]],
+        "written": bool(ns.write and result["ok"]),
+        "path": scene_path,
+    })
+    return 0 if ok else 1
+
+
+def cmd_group_merge(ns) -> int:
+    nodes = [p for p in str(ns.nodes).replace(" ", ",").split(",") if p]
+    op = {"op": "merge_group", "nodes": nodes}
+    if ns.alias:
+        op["alias"] = ns.alias
+    return _run_group_op(ns, op)
+
+
+def cmd_group_ungroup(ns) -> int:
+    return _run_group_op(ns, {"op": "ungroup_group", "group": ns.group})
+
+
+def cmd_group_delete(ns) -> int:
+    return _run_group_op(ns, {
+        "op": "delete_group",
+        "group": ns.group,
+        "recursive": not bool(ns.no_recursive),
+    })
 
 
 def cmd_pins(ns) -> int:
@@ -426,6 +484,27 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("groups", help="组模板 / 场景内的组实例")
     p.add_argument("--scene", default="", help="省略则列出内置组模板")
     p.set_defaults(func=cmd_groups)
+
+    p = sub.add_parser("group-merge", help="把选中节点合并为组（默认 dry-run）")
+    p.add_argument("--scene", required=True)
+    p.add_argument("--nodes", required=True, help="节点 id/alias，逗号分隔（如 2,3,@print_a）")
+    p.add_argument("--alias", default="", help="组别名（省略自动 group_N）")
+    p.add_argument("--write", action="store_true", help="校验通过后写回 scene")
+    p.set_defaults(func=cmd_group_merge)
+
+    p = sub.add_parser("group-ungroup", help="拆分组框，保留成员节点与子组（默认 dry-run）")
+    p.add_argument("--scene", required=True)
+    p.add_argument("--group", required=True, help="组 gid 或 alias")
+    p.add_argument("--write", action="store_true", help="校验通过后写回 scene")
+    p.set_defaults(func=cmd_group_ungroup)
+
+    p = sub.add_parser("group-delete", help="删除组框，保留成员节点（默认 dry-run）")
+    p.add_argument("--scene", required=True)
+    p.add_argument("--group", required=True, help="组 gid 或 alias")
+    p.add_argument("--no-recursive", action="store_true",
+                   help="只删当前组框；默认连同子组")
+    p.add_argument("--write", action="store_true", help="校验通过后写回 scene")
+    p.set_defaults(func=cmd_group_delete)
 
     p = sub.add_parser("apply-ops", help="对已有节点图做增量修改（默认 dry-run）")
     p.add_argument("--scene", required=True)

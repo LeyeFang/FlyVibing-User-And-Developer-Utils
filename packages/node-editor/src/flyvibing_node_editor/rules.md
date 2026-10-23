@@ -174,6 +174,33 @@ phase0 起点用 `TimeTrigger` 调用一次，不能接每帧 Update。
 - `members` 可追加 gate 节点，让组框覆盖整个试次；实际执行仍由图中显式连线决定。
 - 子组 `set_group` 重展开后，外层容器的 `members` 会自动刷新。
 
+### 交互式合并 / 拆分 / 删除
+
+编辑器侧：`Shift+click` 多选，框选只命中节点；右键多选节点或背景 → `Merge into Group`，
+右键组框 → `Ungroup` / `Delete Group`；`Groups` 窗口也有后两个动作。删除只删组框元数据，
+成员节点保留。选择必须完整覆盖已有组，部分覆盖会被拒绝。
+
+编辑器会持久化 `node_groups[gid]` 的可选几何字段（画布坐标）：
+
+```json
+"box":     {"x": 48.0, "y": 38.0, "w": 300.0, "h": 220.0},
+"min_box": {"w": 220.0, "h": 160.0},
+"params":  {"entry": 271, "done": 277, "entry_node": 270, "done_node": 274}
+```
+
+`box`/`min_box` 由 GUI 组框拖动/缩放维护；离线工具应原样保留，不要按 members 重新推导。
+`Groups` 窗口的 `Group name` 输入会更新 `alias`。
+
+离线 CLI（默认 dry-run，`--write` 才落盘）：
+
+```powershell
+python -m flyvibing_node_editor.cli group-merge --scene scene.scene --nodes 2,3 --write
+python -m flyvibing_node_editor.cli group-ungroup --scene scene.scene --group g1 --write
+python -m flyvibing_node_editor.cli group-delete --scene scene.scene --group g1 --write
+```
+
+对应的 `apply-ops` kind：`merge_group` / `ungroup_group` / `delete_group`。
+
 ---
 
 ## Connection Rules

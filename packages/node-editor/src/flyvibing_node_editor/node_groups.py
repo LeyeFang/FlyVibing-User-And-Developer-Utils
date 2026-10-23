@@ -1734,6 +1734,220 @@ def add_group(scene: dict, op: dict) -> dict:
     return {"ok": True, "errors": [], "scene": scene, "symbols": {}}
 
 
+def _group_children(scene: dict, gid: str) -> list[str]:
+    groups = _group_map(scene)
+    grp = groups.get(gid) or {}
+    out: list[str] = []
+    for raw in grp.get("children") or []:
+        cgid = str(raw)
+        if cgid in groups and cgid != gid and cgid not in out:
+            out.append(cgid)
+    for cgid, child in groups.items():
+        if cgid != gid and str((child or {}).get("parent") or "") == gid \
+                and cgid not in out:
+            out.append(cgid)
+    return out
+
+
+def _group_node_ids(scene: dict, gid: str, seen: set[str] | None = None) -> list[int]:
+    if seen is None:
+        seen = set()
+    if gid in seen:
+        return []
+    seen.add(gid)
+    groups = _group_map(scene)
+    grp = groups.get(gid) or {}
+    out: list[int] = []
+    for raw in grp.get("members") or []:
+        try:
+            nid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if nid not in out:
+            out.append(nid)
+    for cgid in _group_children(scene, gid):
+        for nid in _group_node_ids(scene, cgid, seen):
+            if nid not in out:
+                out.append(nid)
+    return out
+
+
+def _group_ancestors(scene: dict, gid: str) -> list[str]:
+    groups = _group_map(scene)
+    out: list[str] = []
+    seen: set[str] = set()
+    cur = str((groups.get(gid) or {}).get("parent") or "")
+    while cur and cur in groups and cur not in seen:
+        seen.add(cur)
+        out.append(cur)
+        cur = str((groups.get(cur) or {}).get("parent") or "")
+    return out
+
+
+def merge_group(scene: dict, op: dict) -> dict:
+    """把已有节点合并为 container 组（不移动/删除节点）。"""
+    from flyvibing_node_editor.ops import _resolve_node, valid_alias
+
+    scene = copy.deepcopy(scene)
+    graph = _graph(scene)
+    nodes = graph.get("nodes") or {}
+    raw = op.get("nodes") or op.get("node_ids") or []
+    if isinstance(raw, str):
+        raw = [part for part in raw.replace(" ", ",").split(",") if part]
+    if not isinstance(raw, list):
+        return {"ok": False, "errors": ["nodes must be a list"], "scene": scene,
+                "symbols": {}}
+    symbols = op.get("symbols") or {}
+    selected: list[int] = []
+    for ref in raw:
+        nid = _resolve_node(scene, ref, symbols)
+        if nid is None:
+            return {"ok": False, "errors": [f"unknown node {ref!r}"],
+                    "scene": scene, "symbols": {}}
+        if nid not in selected:
+            selected.append(int(nid))
+    if len(selected) < 2:
+        return {"ok": False, "errors": ["select at least two nodes to merge"],
+                "scene": scene, "symbols": {}}
+
+    groups = _group_map(scene)
+    selected_set = set(selected)
+    touched: dict[str, set[int]] = {}
+    for gid in groups:
+        members = set(_group_node_ids(scene, gid))
+        hit = members & selected_set
+        if hit:
+            touched[gid] = hit
+    partial = {gid: hit for gid, hit in touched.items()
+               if hit and hit != set(_group_node_ids(scene, gid))}
+    if partial:
+        detail = ", ".join(f"{gid}({len(hit)}/{len(_group_node_ids(scene, gid))})"
+                           for gid, hit in sorted(partial.items()))
+        return {"ok": False,
+                "errors": [f"selection partially covers existing group(s): {detail}"],
+                "scene": scene, "symbols": {}}
+    fully = {gid for gid, hit in touched.items()
+             if hit and hit == set(_group_node_ids(scene, gid))}
+    child_gids = [gid for gid in groups
+                  if gid in fully
+                  and not any(a in fully for a in _group_ancestors(scene, gid))]
+    if len(child_gids) == 1 and not (
+            selected_set - set(_group_node_ids(scene, child_gids[0]))):
+        return {"ok": False, "errors": [f"selection is already group {child_gids[0]}"],
+                "scene": scene, "symbols": {}}
+
+    alias = op.get("alias")
+    if alias is not None:
+        alias = str(alias).strip()
+        if alias and not valid_alias(alias):
+            return {"ok": False, "errors": [f"invalid group alias {alias!r}"],
+                    "scene": scene, "symbols": {}}
+    gid = f"g{_max_group_id(scene) + 1}"
+    if alias:
+        for other in groups.values():
+            if str(other.get("alias", "")).lower() == alias.lower():
+                return {"ok": False, "errors": [f"duplicate group alias {alias!r}"],
+                        "scene": scene, "symbols": {}}
+    else:
+        alias = f"group_{gid[1:]}"
+        taken = {str(g.get("alias", "")).lower() for g in groups.values()}
+        n = 2
+        while alias.lower() in taken:
+            alias = f"group_{gid[1:]}_{n}"
+            n += 1
+
+    for child_gid in child_gids:
+        child = groups.get(child_gid) or {}
+        old_parent = str(child.get("parent") or "")
+        if old_parent and old_parent in groups and old_parent != gid:
+            groups[old_parent]["children"] = [
+                c for c in (groups[old_parent].get("children") or [])
+                if str(c) != child_gid
+            ]
+        child["parent"] = gid
+
+    groups[gid] = {
+        "type": "container",
+        "version": 1,
+        "alias": alias,
+        "params": {"children": list(child_gids), "entry": None, "done": None},
+        "members": sorted(selected),
+        "children": list(child_gids),
+        "slots": {},
+    }
+    return {"ok": True, "errors": [], "scene": scene, "symbols": {},
+            "gid": gid, "alias": alias, "nodes": len(selected)}
+
+
+def ungroup_group(scene: dict, op: dict) -> dict:
+    """拆掉一个组框；子组上移到父级，成员节点保留。"""
+    scene = copy.deepcopy(scene)
+    gid, group = _resolve_group(scene, op.get("group") or op.get("gid"))
+    if group is None:
+        return {"ok": False, "errors": [f"unknown group {op.get('group')!r}"],
+                "scene": scene, "symbols": {}}
+    groups = _group_map(scene)
+    count = len(_group_node_ids(scene, gid))
+    parent = str(group.get("parent") or "")
+    parent_group = groups.get(parent) if parent else None
+    child_gids = _group_children(scene, gid)
+    groups.pop(gid, None)
+    for child_gid in child_gids:
+        child = groups.get(child_gid)
+        if child is None:
+            continue
+        if parent_group is not None:
+            child["parent"] = parent
+            siblings = [str(c) for c in (parent_group.get("children") or [])]
+            if child_gid not in siblings:
+                parent_group["children"] = [*(parent_group.get("children") or []),
+                                            child_gid]
+        else:
+            child.pop("parent", None)
+    if parent_group is not None:
+        parent_group["children"] = [
+            c for c in (parent_group.get("children") or []) if str(c) != gid
+        ]
+    return {"ok": True, "errors": [], "scene": scene, "symbols": {},
+            "gid": gid, "nodes": count, "children": child_gids}
+
+
+def delete_group(scene: dict, op: dict) -> dict:
+    """删除组框（默认递归子组）；只删元数据，成员节点保留。"""
+    scene = copy.deepcopy(scene)
+    gid, group = _resolve_group(scene, op.get("group") or op.get("gid"))
+    if group is None:
+        return {"ok": False, "errors": [f"unknown group {op.get('group')!r}"],
+                "scene": scene, "symbols": {}}
+    groups = _group_map(scene)
+    recursive = op.get("recursive") is not False
+    targets = [gid]
+    if recursive:
+        pending = [gid]
+        seen: set[str] = set()
+        while pending:
+            cur = pending.pop()
+            if cur in seen:
+                continue
+            seen.add(cur)
+            if cur != gid:
+                targets.append(cur)
+            pending.extend(_group_children(scene, cur))
+    count = len(_group_node_ids(scene, gid))
+    for target in reversed(targets):
+        groups.pop(target, None)
+    target_set = set(targets)
+    for other in groups.values():
+        children = [c for c in (other.get("children") or [])
+                    if str(c) not in target_set]
+        if children or "children" in other:
+            other["children"] = children
+        if str(other.get("parent") or "") in target_set:
+            other.pop("parent", None)
+    return {"ok": True, "errors": [], "scene": scene, "symbols": {},
+            "gid": gid, "removed": targets, "nodes": count}
+
+
 def _resolve_group(scene: dict, ref) -> tuple[str | None, dict | None]:
     groups = _graph(scene).get("node_groups") or {}
     name = str(ref or "").lstrip("@")

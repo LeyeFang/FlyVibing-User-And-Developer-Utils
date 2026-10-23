@@ -62,11 +62,17 @@
     最终 `end_panel` 断言杀掉渲染循环；两处官方扩展示例已改 `try/finally` 无条件配对）。
     相反规则：`begin_combo` / `begin_tab_item` **仅返回 True 时** end（无条件 end 会
     "EndPopup too many times"）；`begin_table` 按其返回值配对。
+14. **稳定 ID 纪律（2026-10-21 — Find Node 撞 ID 事故）**：
+    `selectable` / `menu_item` / `small_button` / `button` 等可交互控件的 **ID 必须来自稳定键**，
+    不能只用显示文本。列表/搜索结果/报告条目中显示文本可能合法重复（例如多个未命名 Branch），
+    必须追加隐藏后缀 `##<nid|gid|idx>`；节点用 nid、组用 gid、报告条目用序号。
+    节点 alias 是**人类标签**，不是唯一键；即使 alias 重复也不得导致 `Dear ImGui: conflicting ID`。
+    查询窗口显示 `#<nid>`，让未命名/同名节点仍可区分。
     **静态拦截**（2026-10-12）：`Test/Application/Editor/test_imgui_stack_pairing.py`
     （core — 反模式自检 + 主应用与 `Application/Functions/**` 同源扫描 + 早退补偿的配对计数），
     扩展侧同一规则由审查器 C8/C9/C10 执行；运行期回归以扩展自测（headless imgui 裸绘制帧）为准。
     崩溃定位指引与上游 issue 材料：`Doc/Dev/upstream_imgui_beginchild_fullclip.md`。
-14. **imgui 布局持久化永久禁用**（2026-10-12 实测裁决）：引擎侧 `EditorImguiLayer.OnAttach`
+15. **imgui 布局持久化永久禁用**（2026-10-12 实测裁决）：引擎侧 `EditorImguiLayer.OnAttach`
     以空串禁用 ini（`io.set_ini_filename("")`）—— 实测删文件 → 完整启停编辑器 → 文件不重现，
     即**第三方 ini 对我们完全惰性**（既不读也不写）。配套规则：
     - 需要裸 imgui 上下文的测试/扩展自测**必须**走 `FlyVibing-User-And-Developer-Utils/packages/extension-kit/imgui_headless.py`
@@ -111,6 +117,15 @@
 - 搜索匹配 alias / type / label / description；结果按 alias 前缀优先排序。
 - `Go To` 调用 `center_node_on_screen`（缺失时回退 `navigate_to_selection`）；`Delete` 删除节点及其连线。
 - 场景守卫：`Test/Application/Editor/scenarios/node_editor_find.py`。
+
+节点多选与组操作（2026-10-21）:
+
+- `Shift + 左键` 累加选择；Shift 状态优先读 `Application.Core.Input.InputState`，ImGui
+  注入回退到 `io.key_shift`，选择在 `ne.end()` 后重新提交，避免被原生选择覆盖。
+- 框选由面板按 `canvas_to_screen` 自算矩形，只选择真实节点；组框 NodeId 会被主动剔除。
+- 右键多选节点/背景 → `Merge into Group`；右键组框 → `Ungroup` / `Delete Group`。
+- `Groups` 窗口提供 `Ungroup` / `Delete Group`；删除只删组元数据，成员节点保留。
+- 场景守卫：`Test/Application/Editor/scenarios/node_group_actions.py`。
 
 ---
 
@@ -201,7 +216,10 @@
 | `view.set_mode` | Scene Type 3D/2D/Overlay 按钮 | 按钮高亮、编辑器视口相机投影、`scene.game_type`（决定 PIE 相机） | D + C |
 | `view.set_grid` | View 菜单 ▸ Show Grid | 菜单勾选态、视口网格显隐 | D + Q |
 | `ui.panels` | View 菜单（面板列表本体） | —（只读快照） | D |
-| `ui.panel` | View 菜单 ▸ 面板勾选 | 面板窗口显隐（与菜单勾选同一 `panel.visible` 数据层；扩展窗口同样适用） | D |
+| `ui.panel` | View 菜单 ▸ 面板勾选 | 面板 窗口显隐（与菜单勾选同一 `panel.visible` 数据层；扩展窗口同样适用）；Node Editor 额外返回 view 诊断（节点/组框/组标题屏幕矩形、`group_boxes`、`group_io`（GroupStart/GroupEnd 节点与真实 pin）、`group_title_texts`、`group_descriptions`、框选状态）。诊断只读纯 Python 快照；**不得在渲染帧外调用 node-editor 原生 `get_selected_nodes()`**（无 editor context 会崩溃） | D |
+| `ui.mouse` / `ui.mouse_button` | 鼠标（真实光标 + ImGui 事件） | hover / 按钮态 / 点击命中 | D |
+| `ui.click` / `ui.drag` | 鼠标点击 / 拖拽（逐帧） | hover / 选中 / 拖拽链路 | D |
+| `ui.wheel` / `ui.key` | 滚轮 / 键盘 | 画布缩放 / 快捷键 | D |
 | `camera.get` | Inspector 选中摄像机实体 | — | D |
 | `camera.set` | Inspector Camera 字段 | Inspector 回显、视口/PIE 相机生效 | D + Q |
 | `renderer.snapshot` | —（渲染器诊断） | — | — |
@@ -244,6 +262,10 @@
 | `graph.export` | 工具条/菜单 Export | —（落盘） | — |
 | `graph.import` | 工具条/菜单 Import（validate_first） | 画布整体替换、场景 node_graph 同步 | D |
 | `graph.fit` | 工具栏 Fit | 画布视图适配全部节点 | D |
+| `graph.group.merge` | 右键 Merge into Group | 生成组框；节点位置不变 | D + Q |
+| `graph.group.ungroup` | 右键 / Groups 窗口 Ungroup | 组框消失；成员与子组保留 | D + Q |
+| `graph.group.delete` | Live/工具删除组框 | 组框（含子组）与组内 GroupStart/GroupEnd 消失；用户成员节点保留 | D + Q |
+| `graph.group.destroy` | 右键 / Groups 窗口 Destroy Group | 组框、子组和全部成员节点一起删除 | D + Q |
 | `project.open` | File ▸ Open Project | 场景/资源/节点图全量重载、选中清理 | D + C |
 | `project.save` | File ▸ Save Project / Save As | 场景文件落盘、窗口标题去脏标 | — |
 | `project.export` | File ▸ Export… | 审计日志输出；目标目录旧导出被干净重建（`output/` 实验数据保留） | — |

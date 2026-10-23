@@ -1,5 +1,5 @@
 """图谱编辑 ops — 在已有节点图上做增量修改（link / unlink / set_props / add_node / remove_node /
-set_alias / set_description / add_group / set_group）。
+set_alias / set_description / add_group / set_group / merge_group / ungroup_group / delete_group）。
 
 与 bench 的 patch DSL 同一语义；供 CLI `apply-ops` 与 agent 的 stepwise 编辑使用。
 纯内存操作：返回新的 scene dict，不写文件。
@@ -11,7 +11,8 @@ import copy
 import re
 
 _OPS = ("link", "unlink", "set_props", "add_node", "remove_node",
-        "set_alias", "set_description", "add_group", "set_group")
+        "set_alias", "set_description", "add_group", "set_group",
+        "merge_group", "ungroup_group", "delete_group")
 
 _ALIAS_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -337,6 +338,21 @@ def apply_ops(scene: dict, ops) -> dict:
             res = update_group(scene, op)
             if not res["ok"]:
                 errors.extend(f"op[{i}] set_group: {e}" for e in res["errors"])
+            else:
+                scene = res["scene"]
+                symbols.update(res.get("symbols") or {})
+            continue
+
+        if kind in ("merge_group", "ungroup_group", "delete_group"):
+            from flyvibing_node_editor import node_groups as ng
+            fn = {
+                "merge_group": ng.merge_group,
+                "ungroup_group": ng.ungroup_group,
+                "delete_group": ng.delete_group,
+            }[kind]
+            res = fn(scene, {**op, "symbols": symbols} if kind == "merge_group" else op)
+            if not res["ok"]:
+                errors.extend(f"op[{i}] {kind}: {e}" for e in res["errors"])
             else:
                 scene = res["scene"]
                 symbols.update(res.get("symbols") or {})

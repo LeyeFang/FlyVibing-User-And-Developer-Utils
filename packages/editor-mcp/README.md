@@ -71,7 +71,9 @@ MCP lite/full 都有 `engine_launch(engine_root=..., port="auto", language="zh",
 ## CLI 速览
 
 ```powershell
-engine-editor-cli ops                      # op 目录（60 个核心 op）
+engine-editor-cli ops                      # op 目录（70 个核心 op）
+engine-editor-cli call graph.group.merge nodes=[2,3]   # 选中节点合并为组
+engine-editor-cli call graph.group.ungroup group=g1    # 拆分组框（保留节点）
 engine-editor-cli help entity.transform    # 单 op 详情（参数 + 示例）
 engine-editor-cli call entity.add name=MCP_Cue
 engine-editor-cli call entity.transform id=5 position='[1,0,2]'   # 数组/对象加引号

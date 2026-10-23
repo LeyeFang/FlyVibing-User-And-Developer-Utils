@@ -308,6 +308,9 @@ def check_graph(scene_data: dict) -> list[dict]:
         node_type = nd.get("node_type", "")
         if node_type in _EVENT_TYPES:
             continue
+        if node_type in {"GroupStart", "GroupEnd"}:
+            # 组内部接口节点；未连线是合法状态，不作为孤立节点告警。
+            continue
         if node_type not in _TYPES:
             continue  # 未知类型已报错, 跳过
         node_pin_ids: dict = nd.get("pin_ids", {}) or {}

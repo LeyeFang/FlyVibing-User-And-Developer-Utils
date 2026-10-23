@@ -21,6 +21,11 @@ python Utils/Dev/test_runner.py --only editor
 python Utils/Dev/test_runner.py --tier gui
 python Utils/Dev/test_runner.py --tier all --json     # 末行 JSON 摘要（机器读）
 
+# 改动选择（推荐内层循环）：test_nodes 覆盖 + ui_map 场景合并
+python Utils/Dev/test_runner.py --affected Application/Editor/UI/panels/node_editor/panel.py
+python Utils/Dev/test_runner.py --affected Application/Core/NodeGraph/group_ops.py
+python Utils/Dev/test_runner.py --changed            # git status 改动文件 → affected
+
 # UI 场景回放（真实面板 + 快照 PNG）
 python Test/Application/Editor/ui_scenario.py scenarios/panels_smoke.py
 python Test/Application/Editor/ui_scenario.py --preview          # 交互预览（ESC 退出）
@@ -53,8 +58,9 @@ SUMMARY: 11/12 passed in 84s | failed: test_x | tier=core | skipped=5 | runs: Te
 | `live` | 需要**运行中的编辑器**（e2e；可能启停引擎进程） | 编辑器 + venv | ❌ |
 | `manual` | 交互式工具（人工使用，不进批次） | 人 | ❌ |
 
-- 文件头声明：`# TIER: core`（60 行内任意位置）；未声明按文件名启发式（`e2e_*`→live, `*gizmo*/*grid*/*outliner*`→gui, `*live_ui*`/`*node_runtime*`→manual, `*export_game_bundle*`→heavy, 其余 core）。
+- 文件头声明：`# TIER: core`（60 行内任意位置）；未声明按文件名启发式（`e2e_*`/`test_e2e_*`→live, `*gizmo*/*grid*/*outliner*`→gui, `*live_ui*`/`*node_runtime*`→manual, `*export_game_bundle*`→heavy, 其余 core）。
 - 运行器只默认扫描 `Test/Application/**`；其他目录（Device/RHI 等）按需 `--only` + `--tier all`。
+- **内层循环用 `--affected`**：它同时读取 `test_nodes.json` 的 `covers` 与 `ui_map.json` 的 `scenarios`，不再只靠路径子串。完整 `--tier core` / `--tier gui` 只作提交前门禁。
 
 ## 3. 输出契约（每个测试必须遵守）
 
@@ -91,6 +97,7 @@ SUMMARY: 11/12 passed in 84s | failed: test_x | tier=core | skipped=5 | runs: Te
 - 端口走 `MGE_EDITOR_MCP_PORT` 默认值; 失败时保留截图/日志路径供排查。
 - 运行入口：`python Utils/Dev/test_runner.py --tier live`（或手工单跑脚本）。
 - 验收模板（新 op 实机验证）：`view.set_grid` on/off 截图对比（`Test/_runs/e2e_grid/`）—— 行为断言走 core 回环 + scenario，视觉证据走 e2e 截图。
+- 节点组交互模板：`Test/Application/Editor/test_e2e_node_group_live.py`（`TIER: live`）—— 实机鼠标拖标题/拖出拖入成员/从组端口拖线，断言 view 矩形 + `graph.list` 连线，快照落 `Test/_runs/e2e_node_group_live/`。
 - 线程探针：`python Utils/Dev/thread_probe.py --assert-alive <name,...>`（协议 `threading_protocol.md` §4）。
 
 ## 7. 测试地图（按域）
@@ -118,7 +125,7 @@ SUMMARY: 11/12 passed in 84s | failed: test_x | tier=core | skipped=5 | runs: Te
 | UI 场景回放 | `Test/Application/Editor/scenarios/` | gui | 快照 + 行为断言（panels_smoke / menu_smoke / node_editor_smoke / node_editor_clip_smoke）；已由 `test_runner --tier gui` 自动发现 |
 | 测试节点 / UI 展开图 | `Doc/Dev/test_nodes.{json,md}` + `Doc/Dev/ui_map.{json,md}` + `Utils/Dev/test_map.py` | — | `test_map.py check`、`affected`、`ui tree/check/render`；`test_test_map.py` + `test_ui_map.py` 守卫引用完整性 |
 | ~~UI 面板/gizmo（遗留交互 demo）~~ | ~~`test_*_{opengl,zengl}.py`~~ | — | **2026-10-05 已清理**（18 个交互 demo 删除; 覆盖转入 scenarios + e2e） |
-| 实机 E2E | `Test/Application/Editor/e2e_*.py` + `Test/Application/Extensions/e2e_*.py` | live | 需编辑器运行中（例: `e2e_renderer_check` — 渲染快照 + 裸帧像素采样） |
+| 实机 E2E | `Test/Application/Editor/e2e_*.py` / `test_e2e_*.py` + `Test/Application/Extensions/e2e_*.py` | live | 需编辑器运行中（例: `e2e_renderer_check` — 渲染快照 + 裸帧像素采样；`test_e2e_node_group_live` — 组框视觉与端口拖线） |
 | 线程压力/边界 | `Test/Application/stress/` + `Core/test_thread_boundary.py` | core | `--stress N` 放大; 协议 `threading_protocol.md` |
 | 导出包 | `test_export_game_bundle.py` | heavy | 分钟级重 IO |
 

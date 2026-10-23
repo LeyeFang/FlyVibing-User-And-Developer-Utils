@@ -1,7 +1,7 @@
 """Op registry — 编辑器 Live op 的单一事实源（CLI / 精简 MCP / 文档生成共用）。
 
 数据来源与责任:
-  - 引擎侧实现: Application/Editor/Services/LiveCommandServer.py `_register_ops()`（60 ops）;
+  - 引擎侧实现: Application/Editor/Services/LiveCommandServer.py `_register_ops()`（69 ops）;
   - 本注册表是 agent 侧（CLI/MCP/Skill）的唯一元数据来源;
   - 新增 op 时: 引擎侧注册实现 → 本表加条目 → `python -m engine_editor_mcp.docgen` 重生成 ops.md;
   - 完整性由 Test/Application/Editor/test_editor_mcp_package.py 对照引擎源码守卫。
@@ -76,7 +76,33 @@ OPS: dict[str, OpSpec] = {o.name: o for o in [
     OpSpec("ui.panel", "ui", "读/写单个面板可见性（打开/关闭；与 View 菜单同路径）",
            (Param("name", "str", True, "面板名（ui.panels 列表；如 Node Editor/Scene/Settings）"),
             Param("visible", "bool", False, "true=打开 false=关闭（省略 = 只读）"),
-            Param("toggle", "bool", False, "true=取反（可选；与 visible 二选一）"))),
+            Param("toggle", "bool", False, "true=取反（可选；与 visible 二选一）")),
+           detail="Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nodes/groups（只读）。"),
+    OpSpec("ui.mouse", "ui", "移动鼠标（屏幕坐标；同时移动真实 GLFW 光标并聚焦编辑器）",
+           (Param("x", "float", True, "屏幕 X"),
+            Param("y", "float", True, "屏幕 Y"))),
+    OpSpec("ui.mouse_button", "ui", "按下/抬起鼠标键（down=true/false；0/1/2 = 左/右/中）",
+           (Param("down", "bool", True, "true=按下 false=抬起"),
+            Param("button", "int", False, "0=左键（默认）/1=右键/2=中键"),
+            Param("x", "float", False, "可选：同时移动到的 X"),
+            Param("y", "float", False, "可选：同时移动到的 Y"))),
+    OpSpec("ui.click", "ui", "在 (x,y) 执行真实点击（移动→按下→抬起，跨 3 帧）",
+           (Param("x", "float", True, "屏幕 X"),
+            Param("y", "float", True, "屏幕 Y"),
+            Param("button", "int", False, "0=左键（默认）/1=右键/2=中键"))),
+    OpSpec("ui.drag", "ui", "从 (x0,y0) 拖到 (x1,y1)（逐帧移动，默认 8 步）",
+           (Param("x0", "float", True, "起点 X"),
+            Param("y0", "float", True, "起点 Y"),
+            Param("x1", "float", True, "终点 X"),
+            Param("y1", "float", True, "终点 Y"),
+            Param("steps", "int", False, "中间移动帧数 1..120（默认 8）"),
+            Param("button", "int", False, "0=左键（默认）/1=右键/2=中键"))),
+    OpSpec("ui.wheel", "ui", "滚轮输入（dy 正数向上；画布缩放/列表滚动）",
+           (Param("dy", "float", True, "纵向滚轮量，正数向上"),
+            Param("dx", "float", False, "横向滚轮量（默认 0）"))),
+    OpSpec("ui.key", "ui", "按下/抬起键盘键（key=escape/delete/… 或 ImGui key code）",
+           (Param("key", "str", True, "键名或整数 code"),
+            Param("down", "bool", False, "true=按下（默认）false=抬起"))),
     # ── renderer ──
     OpSpec("renderer.snapshot", "renderer",
            "渲染器状态快照（后端 / GL 信息 / 资源计数 / 视口 / 帧统计; 无头时 available=false）"),
@@ -191,6 +217,21 @@ OPS: dict[str, OpSpec] = {o.name: o for o in [
             Param("path", "str", False, ".json 文件"),
             Param("validate_first", "bool", False, "默认 true"))),
     OpSpec("graph.fit", "graph", "视图适配全部节点（等同节点编辑器工具栏 Fit；截图前常用）"),
+    OpSpec("graph.group.merge", "graph",
+           "把选中节点合并为组（等同画布右键 Merge into Group；不改节点位置）",
+           (Param("nodes", "json", True, "[2,3] 或节点 alias 列表"),
+            Param("alias", "str", False, "组别名；省略自动 group_N"))),
+    OpSpec("graph.group.ungroup", "graph",
+           "拆分组框（保留成员节点与子组；等同 Groups 窗口 Ungroup）",
+           (Param("group", "str", True, "组 gid 或 alias"),)),
+    OpSpec("graph.group.delete", "graph",
+           "删除组框（默认连同子组；只删元数据，成员节点保留）",
+           (Param("group", "str", True, "组 gid 或 alias"),
+            Param("recursive", "bool", False, "默认 true；false 只删当前组框"))),
+    OpSpec("graph.group.destroy", "graph",
+           "销毁组（组框、子组和全部成员节点一起删除；等同画布 Destroy Group）",
+           (Param("group", "str", True, "组 gid 或 alias"),
+            Param("recursive", "bool", False, "默认 true；false 只销毁当前组"))),
     # ── project ──
     OpSpec("project.open", "project", "打开 .myproj 工程（资源+场景全加载）",
            (Param("path", "str", True, ".myproj 路径"),)),

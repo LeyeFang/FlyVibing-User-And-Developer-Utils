@@ -75,11 +75,74 @@
 
 读/写单个面板可见性（打开/关闭；与 View 菜单同路径）
 
+Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nodes/groups（只读）。
+
 - `name` (str, 必填) — 面板名（ui.panels 列表；如 Node Editor/Scene/Settings）
 - `visible` (bool, 可选) — true=打开 false=关闭（省略 = 只读）
 - `toggle` (bool, 可选) — true=取反（可选；与 visible 二选一）
 
 - 示例: `engine-editor-cli call ui.panel name=VALUE visible=true`
+
+### `ui.mouse`
+
+移动鼠标（屏幕坐标；同时移动真实 GLFW 光标并聚焦编辑器）
+
+- `x` (float, 必填) — 屏幕 X
+- `y` (float, 必填) — 屏幕 Y
+
+- 示例: `engine-editor-cli call ui.mouse x=5 y=5`
+
+### `ui.mouse_button`
+
+按下/抬起鼠标键（down=true/false；0/1/2 = 左/右/中）
+
+- `down` (bool, 必填) — true=按下 false=抬起
+- `button` (int, 可选) — 0=左键（默认）/1=右键/2=中键
+- `x` (float, 可选) — 可选：同时移动到的 X
+- `y` (float, 可选) — 可选：同时移动到的 Y
+
+- 示例: `engine-editor-cli call ui.mouse_button down=true button=0`
+
+### `ui.click`
+
+在 (x,y) 执行真实点击（移动→按下→抬起，跨 3 帧）
+
+- `x` (float, 必填) — 屏幕 X
+- `y` (float, 必填) — 屏幕 Y
+- `button` (int, 可选) — 0=左键（默认）/1=右键/2=中键
+
+- 示例: `engine-editor-cli call ui.click x=5 y=5`
+
+### `ui.drag`
+
+从 (x0,y0) 拖到 (x1,y1)（逐帧移动，默认 8 步）
+
+- `x0` (float, 必填) — 起点 X
+- `y0` (float, 必填) — 起点 Y
+- `x1` (float, 必填) — 终点 X
+- `y1` (float, 必填) — 终点 Y
+- `steps` (int, 可选) — 中间移动帧数 1..120（默认 8）
+- `button` (int, 可选) — 0=左键（默认）/1=右键/2=中键
+
+- 示例: `engine-editor-cli call ui.drag x0=5 y0=5`
+
+### `ui.wheel`
+
+滚轮输入（dy 正数向上；画布缩放/列表滚动）
+
+- `dy` (float, 必填) — 纵向滚轮量，正数向上
+- `dx` (float, 可选) — 横向滚轮量（默认 0）
+
+- 示例: `engine-editor-cli call ui.wheel dy=5 dx=0`
+
+### `ui.key`
+
+按下/抬起键盘键（key=escape/delete/… 或 ImGui key code）
+
+- `key` (str, 必填) — 键名或整数 code
+- `down` (bool, 可选) — true=按下（默认）false=抬起
+
+- 示例: `engine-editor-cli call ui.key key=VALUE down=true`
 
 ## 渲染器诊断
 
@@ -447,6 +510,41 @@
 视图适配全部节点（等同节点编辑器工具栏 Fit；截图前常用）
 
 - 示例: `engine-editor-cli call graph.fit`
+
+### `graph.group.merge`
+
+把选中节点合并为组（等同画布右键 Merge into Group；不改节点位置）
+
+- `nodes` (json, 必填) — [2,3] 或节点 alias 列表
+- `alias` (str, 可选) — 组别名；省略自动 group_N
+
+- 示例: `engine-editor-cli call graph.group.merge nodes={"k":1} alias=VALUE`
+
+### `graph.group.ungroup`
+
+拆分组框（保留成员节点与子组；等同 Groups 窗口 Ungroup）
+
+- `group` (str, 必填) — 组 gid 或 alias
+
+- 示例: `engine-editor-cli call graph.group.ungroup group=VALUE`
+
+### `graph.group.delete`
+
+删除组框（默认连同子组；只删元数据，成员节点保留）
+
+- `group` (str, 必填) — 组 gid 或 alias
+- `recursive` (bool, 可选) — 默认 true；false 只删当前组框
+
+- 示例: `engine-editor-cli call graph.group.delete group=VALUE recursive=true`
+
+### `graph.group.destroy`
+
+销毁组（组框、子组和全部成员节点一起删除；等同画布 Destroy Group）
+
+- `group` (str, 必填) — 组 gid 或 alias
+- `recursive` (bool, 可选) — 默认 true；false 只销毁当前组
+
+- 示例: `engine-editor-cli call graph.group.destroy group=VALUE recursive=true`
 
 ## 工程
 

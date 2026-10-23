@@ -16,6 +16,9 @@ python -m flyvibing_node_editor.cli find   --scene <scene> --type Constant --pro
 python -m flyvibing_node_editor.cli find   --scene <scene> --alias trial_end                # 按别名定位
 python -m flyvibing_node_editor.cli groups                                # 内置组模板
 python -m flyvibing_node_editor.cli groups --scene <scene>                # 场景内组实例
+python -m flyvibing_node_editor.cli group-merge --scene <scene> --nodes 2,3 --write            # 选中节点合并为组
+python -m flyvibing_node_editor.cli group-ungroup --scene <scene> --group g1 --write           # 拆分组框，保留节点
+python -m flyvibing_node_editor.cli group-delete --scene <scene> --group g1 --write            # 删除组框，保留节点
 python -m flyvibing_node_editor.cli apply-ops --scene <scene> --ops ops.json [--write]        # 增量改图（默认 dry-run）
 ```
 
@@ -26,14 +29,14 @@ python -m flyvibing_node_editor.cli apply-ops --scene <scene> --ops ops.json [--
 
 | 文件 | 作用 |
 |---|---|
-| `cli.py` | 命令行入口（rules / entities / build / apply / flow / pins / find） |
+| `cli.py` | 命令行入口（rules / entities / build / apply / flow / pins / find / group-*） |
 | `rule_sections.py` + `rules.md` | 节点图规则参考（**按节读取**，避免一次性灌满上下文） |
 | `spec_builder.py` | 实验 spec → 节点图（trial 计时器/相位/分支/触发编码） |
 | `graph_builder.py` | 节点图数据结构与连线 |
 | `node_graph_validator.py` | **校验唯一实现**：L1 规则（`check_graph`）+ 兼容入口 `validate_static`；L2 干跑委托引擎 `validation.dry_run` |
 | `graph_flow.py` | **静态执行流（V1）**：不执行引擎，输出“从某事件出发的真实执行顺序”（含 Branch 分支、TimeTrigger 门控、环检测） |
 | `apply_graph.py` | 把图注入 `.scene` |
-| `ops.py` | **增量编辑**（link / unlink / set_props / add_node / remove_node / set_alias / set_description / add_group / set_group），供 `apply-ops` 与分步 agent 使用 |
+| `ops.py` | **增量编辑**（link / unlink / set_props / add_node / remove_node / set_alias / set_description / add_group / set_group / merge_group / ungroup_group / delete_group），供 `apply-ops` 与分步 agent 使用 |
 | `node_groups.py` | **节点组**：模板注册（`cue_n_way` / `cue_window` / `hide_group` / `container` / `mi_select` / `phase0_trigger` / `sss_pulse`）、扁平展开、按 arm 差分重展开 |
 | `mcp_server.py` | MCP 服务端（stdio） |
 | `test_smoke.py` | 冒烟自测 |
