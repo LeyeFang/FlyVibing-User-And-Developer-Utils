@@ -22,6 +22,7 @@ The `skills/` directory contains the source for the `engine-editor` and `node-gr
 ## Requirements
 
 - Python 3.10 or newer for all tooling.
+- `editor-mcp` is pinned to `mcp==1.10.1`, `pydantic==2.13.4`, and `pydantic-settings==2.14.2`, matching the engine wheelhouse.
 - A running FlyVibingEngine editor for live operations. Offline graph authoring and extension review do not require the engine to be running.
 - Engine source on `PYTHONPATH` when using `node-editor` validation, because validation reuses the engine's node registry and graph constraints. See [`packages/node-editor/README.md`](packages/node-editor/README.md).
 
@@ -42,6 +43,29 @@ python scripts/build_tools.py
 ```
 
 This synchronizes the skills into `editor-mcp` and `node-editor`, builds the three wheels, and writes `dist/CHECKSUMS.sha256`.
+
+## Releases
+
+The toolchain is distributed as a zip archive; it does not use an installer
+executable. The current release is **0.5.0**:
+
+```powershell
+python scripts/release_tools.py
+```
+
+The command rebuilds the wheels and writes:
+
+```text
+dist/releases/v0.5.0/any/
+    FlyVibing-Tools-0.5.0.zip
+    FlyVibing-Tools-0.5.0.zip.sha256
+    release-manifest.json
+```
+
+The zip contains `install.cmd` / `install.ps1` (Windows), `install.sh`
+(macOS/Linux), `install.py`, the three wheels, `CHECKSUMS.sha256`, and the
+install notes. It is platform-independent (`any`) because all bundled wheels
+are pure Python; the installer selects the local Python 3.10+ interpreter.
 
 ## Quick start
 
@@ -138,7 +162,8 @@ Node-graph behavior has one implementation and one source of rules:
 | `packages/node-editor/` | Offline graph builder, validator, flow analyzer, and MCP server |
 | `packages/extension-kit/` | Extension reviewer and headless ImGui helper |
 | `skills/` | Source for the `engine-editor` and `node-graph` skills, synchronized into the packaged copies during build |
-| `scripts/` | Build and documentation synchronization scripts |
+| `packaging/` | One-click installers and install notes copied into the release zip |
+| `scripts/` | Build, release packaging, and documentation synchronization scripts |
 | `docs/` | Tutorial and localized documentation |
 
 ## Development

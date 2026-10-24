@@ -37,7 +37,9 @@
 **A. 最省事：让 CLI 自己装配（推荐）**
 
 ```powershell
-pip install flyvibing-editor-mcp     # 或从本仓库 wheel/ 安装
+# Windows：解压 FlyVibing-Tools-0.5.0.zip 后双击 install.cmd
+# 或从本仓库 wheel/ 安装：
+pip install engine-editor-mcp
 engine-editor-cli setup --workspace D:\Experiments\MyParadigm
 ```
 

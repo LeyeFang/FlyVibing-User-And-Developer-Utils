@@ -25,7 +25,10 @@ pip install engine_editor_mcp-0.5.0-py3-none-any.whl
 pip install -e packages/editor-mcp
 ```
 
-依赖：`mcp>=1.10`、`Pillow`、`numpy`。
+依赖：`mcp==1.10.1`、`pydantic==2.13.4`、`pydantic-settings==2.14.2`（与引擎 wheelhouse 对齐）、`Pillow`、`numpy`。
+
+工具链发行版 zip（`FlyVibing-Tools-0.5.0.zip`）内含三个 wheel 和一键安装脚本：
+解压后双击 `install.cmd`，或执行 `sh install.sh`。
 
 ## 在三方工作区启用（任意 IDE）
 

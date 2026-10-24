@@ -22,6 +22,7 @@ FlyVibing Utils 是 [FlyVibingEngine](https://github.com/LeyeFang/MyGameEngine-P
 ## 环境要求
 
 - 全部工具需要 Python 3.10 或更新版本。
+- `editor-mcp` 固定 `mcp==1.10.1`、`pydantic==2.13.4`、`pydantic-settings==2.14.2`，与引擎 wheelhouse 对齐。
 - 实时操作需要 FlyVibingEngine 编辑器正在运行。离线构图与扩展审查不要求引擎运行。
 - 使用 `node-editor` 的校验能力时，引擎源码需位于 `PYTHONPATH` 上，因为校验复用引擎的节点注册表与图约束。详见 [`packages/node-editor/README.md`](../packages/node-editor/README.md)。
 
@@ -42,6 +43,27 @@ python scripts/build_tools.py
 ```
 
 该命令会把 skills 同步进 `editor-mcp` 与 `node-editor`，构建三个 wheel，并把校验和写入 `dist/CHECKSUMS.sha256`。
+
+## 发布包
+
+工具链以 zip 压缩包发布，不使用 exe 安装器。当前版本为 **0.5.0**：
+
+```powershell
+python scripts/release_tools.py
+```
+
+命令会重建三个 wheel，并输出：
+
+```text
+dist/releases/v0.5.0/any/
+    FlyVibing-Tools-0.5.0.zip
+    FlyVibing-Tools-0.5.0.zip.sha256
+    release-manifest.json
+```
+
+zip 内含 `install.cmd` / `install.ps1`（Windows）、`install.sh`（macOS/Linux）、
+`install.py`、三个 wheel、`CHECKSUMS.sha256` 和安装说明。工具是纯 Python，
+因此平台标记为 `any`；一键安装脚本会自动选择本机 Python 3.10+。
 
 ## 快速开始
 
@@ -138,7 +160,8 @@ flyvibing-review --all
 | `packages/node-editor/` | 离线图构建、校验、执行流分析与 MCP 服务端 |
 | `packages/extension-kit/` | 扩展审查器与无头 ImGui 工具 |
 | `skills/` | `engine-editor` 与 `node-graph` 技能的源文件，构建时同步进打包副本 |
-| `scripts/` | 构建与文档同步脚本 |
+| `packaging/` | 一键安装脚本与安装说明（复制进发布 zip） |
+| `scripts/` | 构建、发布打包与文档同步脚本 |
 | `docs/` | 教学文档与本地化文档 |
 
 ## 开发
