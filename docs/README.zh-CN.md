@@ -189,6 +189,7 @@ python scripts/build_tools.py --no-sync # 只构建
 | 文档 | 内容 |
 |---|---|
 | [`docs/TUTORIAL.md`](TUTORIAL.md) | 端到端流程：从空工作区到设计工程与可运行成品 |
+| [`docs/DEVELOPMENT_GUIDES.md`](DEVELOPMENT_GUIDES.md) | 扩展、编辑器 UI、节点包与 Example 开发指南索引 |
 | [`packages/editor-mcp/README.md`](../packages/editor-mcp/README.md) | CLI/MCP 档位、操作、环境变量与抓帧行为 |
 | [`packages/node-editor/README.md`](../packages/node-editor/README.md) | 离线图工作流、增量编辑、别名与节点组 |
 | [`packages/extension-kit/README.md`](../packages/extension-kit/README.md) | 静态审查规则与无头 ImGui 测试 |

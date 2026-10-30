@@ -191,6 +191,7 @@ Roadmap: extension type stubs (`ExtensionBase`/`ExtensionContext`) and templates
 | Document | Contents |
 |---|---|
 | [`docs/TUTORIAL.md`](docs/TUTORIAL.md) | End-to-end workflow: from an empty workspace to a design project and a runnable build |
+| [`docs/DEVELOPMENT_GUIDES.md`](docs/DEVELOPMENT_GUIDES.md) | Extension, editor UI, node-pack, and Example development guides |
 | [`packages/editor-mcp/README.md`](packages/editor-mcp/README.md) | CLI/MCP profiles, operations, environment variables, and capture behavior |
 | [`packages/node-editor/README.md`](packages/node-editor/README.md) | Offline graph workflows, incremental edits, aliases, and node groups |
 | [`packages/extension-kit/README.md`](packages/extension-kit/README.md) | Static review rules and headless ImGui testing |

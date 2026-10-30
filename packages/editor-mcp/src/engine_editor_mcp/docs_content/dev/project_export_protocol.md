@@ -113,7 +113,10 @@ load_scene_from_file` 以及 `ProjectManager._load_all_scenes` 都必须维护 `
 - **重复导出 = 干净重建**（2026-09-28）：目标为旧导出时先清空其内容再重建（防止旧场景名/旧轮子/旧引擎文件残留）；仅**保留 `output/`**（实验数据）；
 - 目标路径与当前工程目录**完全相等**时拒绝（防止覆盖 live .myproj）；
 - 缺失资源 → 记 warnings 并**从包中剔除**（引用它的场景保留旧 id，打开时同现状告警）；
-- 同名文件批内去重（`_2` 后缀）；返回摘要 dict（dir/project/scenes/assets/bytes/warnings）。- **扩展 opt-out**：导出游戏层时扫描 `Application/Functions/**/extension.json`，`export:false` 的扩展目录整棵跳过（本地夹具/私有后端），路径记入 manifest `export_excluded`；默认 `true` 保持官方扩展行为；
+- 同名文件批内去重（`_2` 后缀）；返回摘要 dict（dir/project/scenes/assets/bytes/warnings）。
+- **游戏导出 = 按需、用户态**：只带当前工程场景实际引用到的 node pack 所属扩展目录（扫描场景 `node_type` → `NodePackRegistry.extension_dirs_for_types`）。未用到的官方扩展不随游戏包分发；`export:false` 仍是第三方/本地扩展的硬 opt-out；无法解析的节点类型写入 warnings。非 mainline 扩展若被场景引用且未 opt-out，会进入游戏包并产生“自行确认再分发版权”warning；manifest `extensions` 记录 `mode=on_demand` / `scene_node_types` / `required_dirs` / `non_mainline` / `unresolved_types`；
+- **安装包 ≠ 游戏导出**：`Utils/Dev/Installer/build_installer.py` 使用独立的 mainline allowlist `Application/Functions/official_extensions.json`。只有 allowlist 内官方扩展进入安装包；本地/第三方目录（即使未声明 `export:false`）一律排除；官方扩展的 `export:false` 不得在这里“错杀”（该字段只服务游戏导出）。回归：`test_release_layout.py` / `test_extension_boundary.py`；
+- **编辑器本地状态不导出**：`Application/Editor/Config/`（git-ignored 的扩展启用表、PIE/UI 布局、`extensions_data/`）同时从游戏层与安装包 staging 排除，路径记入 manifest；否则安装后会留下本地插件启用痕迹/本机设置（回归：`test_export_game_bundle.py` / `test_release_layout.py`）；
 - **第三方声明**：根目录 `THIRD_PARTY_NOTICES.md` 复制到导出包根目录并列入 manifest `files`；
 ---
 

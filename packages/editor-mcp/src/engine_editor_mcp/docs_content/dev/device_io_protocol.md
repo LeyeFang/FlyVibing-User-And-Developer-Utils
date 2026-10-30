@@ -9,7 +9,7 @@
 
 | 模块 | 架构 | 要点 |
 |---|---|---|
-| `Application/Functions/SerialParallelDevice/` | 全局单例 + I/O 线程 + 队列 | `api.py`（start/stop/send/write_parallel）、`io_thread.py`、`state.py`、`test_hooks.py`；无驱动优雅降级；5ms 自动复位 |
+| `Application/Functions/SerialParallelDevice/` | 全局单例 + I/O 线程 + 队列 | `api.py`（start/stop/send/write_parallel）、`io_thread.py`、`state.py`、`test_hooks.py`；无驱动优雅降级；写非零后自动复位（默认 5ms，`set_reset_delay` 可配） |
 | `Application/Functions/VirtualDevice/` | 设备模块（会话注册表 + 后端协议 + 环形缓冲 + 服务进程 + 面板扩展） | `Device.py`（后端无关：配置/缓冲/会话/注册表/落盘）、`ServiceProtocol/ServiceHost/ServiceClient.py`（服务进程通信，见 §7）、`SigGen.py`（虚拟信号发生器后端）、`service.py`（服务入口）、`extension.py`（面板）、`__init__.py`（门面路由; 2026-10-16 EEGDevice 并迁） |
 
 共同约束：
@@ -67,6 +67,25 @@
 - 空跑：`pump(elapsed_s)` 由**图线程**同步调用（无并发）。
 - 时序坑（已修复，勿回退）：`RecordingSession.start()` 必须**先** `backend.start()`
   **再** `backend.pump(elapsed_s)` —— 空跑后端在 pump 中锚定仿真起点；顺序反了会得到空数据。
+
+### 4.1 I/O 线程所有权：单线程 + 租约（editor / runtime — 2026-10-30）
+
+**问题**: 编辑器面板需要手动调试（发串/发并口/看监视），PIE 也需要 I/O。若两边**各开一条线程**，
+会争抢同一个 InpOut 驱动、同一批串口句柄与同一份复位调度 —— 必然互相踩。
+
+**方案**: 硬件只有一套 → **永远只有一条 `spd-io` 线程**；`start(owner)` / `stop(owner)` 操作的是
+**租约**而不是线程。
+
+| owner | 谁取 | 何时取 / 放 |
+|---|---|---|
+| `runtime` | `GameRuntime.start()` / `run()` | PIE/成品启动取，`stop()` 放（`PlayerBootstrap` 退出走 `stop_all()`） |
+| `editor` | 扩展面板与 `ext.device.*` ops | 首次写/发/监视取，扩展停用（`on_disable`）/ 卸载释放 |
+
+- 线程存活 = 租约集合非空；`stop(owner)` 只移除自己的租约。
+- **交权**: PIE 运行期间关闭面板 / 停用扩展**不会**停线程（runtime 仍持租约）；
+  PIE 停止后若面板仍在调试，线程也继续跑。
+- 报告: `io_owner()` → `"runtime" | "editor" | "none"`（面板状态行、`ext.device.status.io_owner`）。
+- 并口复位只在 `spd-io` 内执行 → **线程不在 = 不会复位**（这也是面板必须自己取租约的原因）。
 
 ---
 
@@ -161,6 +180,14 @@
    `kill` 无会话时宽容返回（幂等）。服务进程客户端断开即退出（不驻留）。
 8. 控制台编码：GBK 环境**管道输出**（如 `| Select-Object`）遇非 GBK 字符（`↔` 等）会 UnicodeEncodeError
    —— 测试脚本打印只用 GBK 覆盖的符号（`──` `×` `→` 可用，箭头互指用 `<->`）。
+9. 面板调试输出"看着发了但设备没收到"（2026-10-30 两处必现缺陷，均已修）:
+   - **不取租约就写** = 静默丢弃: 旧面板 Write 不调 `start()`，`write_parallel` 见 `_running=False`
+     只 print 一行就 `return`，UI 无任何提示。现在面板写/发前一律 `start("editor")`，并以
+     `strict=True` 入队（失败抛 `DeviceNotReady` → 面板错误行）。
+   - **格式选错** = 数据口就是 0x00: `"bytes"` 是 `struct.pack("<f", …)`（4 字节 float32 LE），
+     写 `1.0` 落到 base+0 的是 `0x00`，设备端什么也看不到；且 +2/+3 在标准 LPT 上是控制/状态寄存器。
+     单字节触发码必须用 `"byte"`（节点评估器一直是 `"byte"`，所以图能跑、面板不能）。
+     面板现默认 `byte`，并在写入前显示 `-> 0x3FF8 <- 01 (1B)` 预览。
 
 ---
 
@@ -181,18 +208,26 @@
   `@name` → 注册表 → 物理端口；其它 → 原样直通（裸 `COMx` 仍可用，兼容旧场景）。`send` /
   `start_watch` 在**入队前**解析；扩展面板与节点走同一条路径。
 - **未绑定 = 显式报错，绝不静默回退**: `DeviceUnresolved` 消息含"绑在哪、怎么绑"
-  （面板 Device names 段 / `ext.device.bind_alias name=… port=…`）与注册表路径。
+  （Device Manager 面板 / `ext.device.bind_alias name=… port=…`）与注册表路径。
 - **静态校验（提前发现）**: 校验规则 13 扫描节点 props 中任意 `@` 前缀值 → 本机未绑定则 warning
   `device_alias_unresolved`（打开场景即提示，不必等运行）；已绑定不报；裸端口不参与。
 - **求值器不再猜端口**: `SerialSend.port` 默认值由 `"COM1"` 改为 `""`（**兼容性变更**）——
   未配置端口时显式 `emit_log(..., "error", ...)` 并跳过，不再往 COM1 盲写。
-- **日常动线（迁移一台机器）**: 插设备 → 面板 Device names 段 → [Bind current port]
-  （或 agent `ext.device.bind_alias name=mibox`）→ 需要时 [Migrate N node(s) -> @mibox] 把场景里
+- **日常动线（迁移一台机器）**: 插设备 → 刷新端口枚举 → Device Manager 选目标端口 →
+  [Bind target port]（或 agent `ext.device.bind_alias name=mibox`）→ 需要时 [Migrate N node(s) -> @mibox] 把场景里
   裸 `COMx` 的节点批量换成 `@mibox`（= `ext.device.bind_nodes`，`dry_run` 可先预演）。
+- **面板布局（v0.4.0，2026-10-30）**: ①监视面板的 `Port` 是**枚举下拉**（不再手输；当前值
+  不在枚举内时标 `(not found)` / `(alias)`，刷新按钮重新枚举）；②绑定管理移到独立面板
+  **Device Manager**（按需窗口，enable 不自动弹；监视面板 `Devices` 行按钮或 View 菜单打开）；
+  ③**改绑/解绑前弹窗确认**，列出当前场景引用该别名/端口的节点（`#id Type`）；
+  解绑后这些节点变为 `device_alias_unresolved`（校验 warning + 运行时显式报错），需重新绑定。
+  确认文案由纯函数 `describe_binding_impact(...)` 生成（可无头测试）。
+  ④表单统一左置标签（`_form_label`），与设备族面板同一视觉语言。
 - **官方示范（面板 → 场景 同步）**: 面板按钮与 agent 调用**同一个**操作实现（动作单点），
   经 `ctx.graph`（`capabilities` 含 `"graph"` 才注入；只读 `nodes/find` + 受控 `set_props`）
   读写当前图，扩展不 import 编辑器层。`ext.device.status` 一并返回别名视图。
-- 测试: `Test/Application/Functions/test_device_alias.py`（31 checks — 注册表 / 解析 / 发送链路 /
-  求值器 / 校验 / 扩展 ops；注册表用 `MGE_DEVICES_FILE` 沙箱，不污染真实机器配置）。
+- 测试: `Test/Application/Functions/test_device_alias.py`（41 checks — 注册表 / 解析 / 发送链路 /
+  求值器 / 校验 / 扩展 ops / Device Manager 影响文案与节点引用；注册表用 `MGE_DEVICES_FILE` 沙箱，
+  不污染真实机器配置）。
 - 规划（未做）: 自动重绑 —— `hint` 已预留 `usb_serial` / `vid_pid`，用于同型号设备换口自动认出。
 

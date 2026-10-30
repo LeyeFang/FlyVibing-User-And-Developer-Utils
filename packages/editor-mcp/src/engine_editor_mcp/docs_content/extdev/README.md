@@ -59,3 +59,6 @@
 | 文档 | 内容 |
 |---|---|
 | `extension_dev_protocol.md` | **规范全文**（14 节）：快速上手 / manifest / 生命周期 / ctx 能力 / UI / 节点包 / MCP-CLI 生态 / 线程 / 测试 / 实装地图 / 提交检查单 |
+| `ui_development.md` | **UI 开发指南**：`ctx.ui.register_window`、`UIExtensionBase`、`close_policy`、线程/测试/审查 |
+| `node_development.md` | **节点开发指南**：`NodePackRegistry`、node_pack.py、pins/fields、evaluator、发现与校验 |
+| `example_development.md` | **Example 开发指南**：场景 + 节点图 + README + PIE/干跑/导出验收 |

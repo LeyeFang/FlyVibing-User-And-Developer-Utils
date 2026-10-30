@@ -1,5 +1,7 @@
 # 扩展开发规范协议（Extension Development Protocol）
 
+> 配套任务指南：[UI 开发](ui_development.md) · [节点开发](node_development.md) · [Example 开发](example_development.md)。
+>
 > 读者: **外部/无上下文的开发者与 agent**（模拟社区生态 — 只有本文件 + 仓库即可开工）。
 > 架构背景: `extension_protocol.md`（三层高度模型 / 三档侵入 / 兼容机制）。
 > 状态: **M0 已实装 + M1 部分实装**（`ctx.ui.register_window` 2026-10-11；
@@ -103,7 +105,7 @@ engine-editor-cli call ext.mything.info                # 扩展 op 直接可调�
 | `entry` | 有代码则必填 | `"extension.py:create_extension"` 形式; **文件缺失 → broken**; 省略 = 仅计划（不可启用） |
 | `description` | 建议 | 菜单 tooltip / 文档 |
 | `capabilities` | 建议 | 声明所需能力。**合法值集**（与审查器 M5 同源）: `ops` / `ui` / `nodes` / `threads` / `jobs` / `settings` / `device` / `graph`。语义见 §6 能力表；`requires` 暂仅解析展示（依赖拓扑 M3） |
-| `export` | 可选 | 默认 `true`。`false` = 该扩展目录不进入 `File ▸ Export` 游戏层（本地夹具/第三方私有后端用）；导出清单 `export_excluded` 会记录路径 |
+| `export` | 可选 | 默认 `true`。仅控制 **游戏导出**：`false` = 该扩展目录不进入 `File ▸ Export` 游戏层（即使场景用到其节点也会告警并排除）；**不影响安装包**——安装包按 `Application/Functions/official_extensions.json` mainline allowlist 分发。导出清单 `export_excluded` 会记录路径 |
 
 **状态语义**（`extension.list` / 菜单）: `planned`（无 entry）· `disabled`（可装载未启用）·
 `enabled`（已装载）· `broken`（manifest/加载错误 — 原因在 `error` 字段与 tooltip）。
@@ -132,19 +134,43 @@ rescan:  已装载者全部 unload 后重新扫描（Extensions 菜单 ▸ Resca
 | `ctx.extension_dir` / `ctx.data_dir` / `ctx.engine_root` | ✅ M0 | 只读资产目录 / 可写数据目录 / 引擎根 |
 | `ctx.log(msg)` | ✅ M0 | `[ext:<id>]` 前缀日志（Console 通道 M1） |
 | `ctx.ops.register(name, fn, summary="")` | ✅ M0 | **扩展 op**（§9 生态核心） |
-| `ctx.ui.register_window(name, draw_fn, visible=False, flags=None, close_policy="hide")` | ✅ M1 (2026-10-11) | 注册独立窗口（唯一入口 `ExtensionUI`；重名冲突/异常隔离/purge/窗口生命周期完备性 见 §7；默认不抢焦点，enable 时 `show_all` 统一打开） |
+| `ctx.ui.register_window(name, draw_fn, visible=False, flags=None, close_policy="hide", show_on_enable=True, first_pos=None, first_size=None)` | ✅ M1 (2026-10-11; 参数扩展 2026-10-30) | 注册独立窗口（唯一入口 `ExtensionUI`；重名冲突/异常隔离/purge/窗口生命周期完备性 见 §7；默认不抢焦点）。`show_on_enable=False` = **按需窗口**（enable 时 `show_all` 不弹它，用 `ctx.ui.show_window(name)` 或 View 菜单打开）；`first_pos`/`first_size` = 首次出现位置/尺寸（`Cond_.first_use_ever`，附属窗口用它错开主面板） |
+| `ctx.ui.show_window(name)` | ✅ M1 (2026-10-30) | 把本扩展的某个窗口置为可见（主面板里的“打开 XXX”按钮同路径）；非本扩展/不存在 → `False` |
 | `ctx.ui.register_command / post / kit` | `[M1 待]` | 命令 / 帧安全点 / 控件包（设计见 `extension_protocol.md` §5.1） |
 | `ctx.nodes.register_pack(...)` | ✅ M1 (2026-10-20) | 节点包（声明 + evaluator + 控件字段；§8） |
 | `ctx.settings(schema)` | `[M1]` | schema 化设置（自动 UI + 持久化）；落地后**页面注册进 Settings 面板**（与 `Common`/`Export` 同级 — 宿主侧已就绪: `SettingsPanel.register_page` / `unregister_pages_by_owner`，见 `Doc/Dev/ui_protocol.md` §13） |
 | `ctx.threads / ctx.jobs / ctx.bus` | `[M2]` | 受管线程 / 后台任务 / 数据总线 |
 | `ctx.ui.post(fn)` | `[M1]` | 后台线程 → 渲染线程帧安全点 |
 | `device`（能力键, **非** ctx 对象） | ✅ M0 | 语义 = **允许导入设备门面** `Application.Functions.VirtualDevice`（在 C6 白名单内）；**不提供 `ctx.device`**（不扩大 API 面）; 三模式（sim/device/virtual）与无硬件验收通道见 `Doc/Dev/device_io_protocol.md` §7 |
-| `ctx.graph`（能力键 `graph`） | ✅ M1 (2026-10-12) | **受限图访问** — 面板 ↔ 场景节点同步的官方通道（“在这里点一下, 场景里就改好了”）。仅三件事: `nodes()`（深拷贝快照）/ `find(prop, equals=None, prefix=None)` / `set_props(node_id, fields)`；无删除/新增/连边。**不 import 编辑器层**（`Application/Editor/Extensions/ExtensionGraph.py` 代转发到编辑器单一入口）。未声明 `graph` 时 `ctx.graph is None` |
+| `ctx.graph`（能力键 `graph`） | ✅ M1 (2026-10-29 扩展) | **受限图访问** — `nodes()` / `owned_nodes()` / `find(...)` / `find_type(...)` 读取；`add_node` / `update_node` / `set_props` / `replace_props` / `remove_node` / `add_link` / `remove_link` 写入；`request_redraw()` 触发编辑器重绘。默认只允许创建/改写/删除本扩展 owner 的节点，连线至少一端属于本扩展。**不 import 编辑器层**（`ExtensionGraph` 转发到编辑器单一入口）。未声明 `graph` 时 `ctx.graph is None` |
 
 > 能力键 `device` 与其它行的区别: 前几行是"宿主注入的 ctx 能力对象", `device` 是**导入许可声明**
 > （2026-10-12 裁决）。
 
 未实装能力对应的 ctx 属性为 `None` — 扩展必须做能力检测（`if ctx.ui is None: ...`）。
+
+### 6.1 `ctx.graph` 写入示例（仅操作自己拥有的节点）
+
+```python
+# 创建自己的节点（owner 必须等于扩展 manifest id）
+n = ctx.graph.add_node("ext.acme.Init", position=(320, 120),
+                       props={"gain": 2.0}, alias="acme_init")
+# 检索自己的节点（type_prefix / owned_only）
+nodes = ctx.graph.find_type(prefix="ext.acme.", owned_only=True)
+# 覆写属性 / alias / description
+ctx.graph.update_node(n["id"], props={"gain": 4.0}, description="updated")
+ctx.graph.set_props(n["id"], {"mode": "device"})       # 合并
+ctx.graph.replace_props(n["id"], {"mode": "device"})   # 整体覆写
+# 连线（至少一端属于本扩展）
+ctx.graph.add_link(n["id"], "exec_out", other["id"], "exec_in")
+# GUI 刷新（标记 revision + 请求下一帧重绘）
+ctx.graph.request_redraw()
+```
+
+`add_node/update_node/remove_node/set_props` 默认只接受本扩展 owner 的节点；
+跨扩展/core 节点会抛 `PermissionError`。读取接口默认返回全图快照，可用
+`owned_only=True` 或 `type_prefix="ext.acme."` 缩小范围。所有写入都在主线程
+（扩展 `on_load` / ops / UI 回调）执行，不要从后台线程改图。
 
 ## 7. UI 规范（`ctx.ui` — `register_window` 已实装 2026-10-11）
 
@@ -161,6 +187,9 @@ rescan:  已装载者全部 unload 后重新扫描（Extensions 菜单 ▸ Resca
 4. **启停对称**: disable / 卸载 → 宿主自动注销该扩展全部窗口与 ops（保险丝）;
    enable 重走 on_load（新实例）→ 推荐扩展实现**幂等 `_install(ctx)`**（on_load/on_enable 共用,
    窗口重名 `ValueError` 静默跳过）— 完整模式见官方示例。
+   **多窗口（2026-10-30）**: enable 时 `show_all` 只打开 `show_on_enable=True` 的主窗口;
+   附属/管理窗口注册时设 `show_on_enable=False` + `first_pos`/`first_size` 错开主面板,
+   由主面板按钮调用 `ctx.ui.show_window(name)` 或用户在 View 菜单打开。
 5. **线程 → UI 通道**: 快照式读取（业务模块线程安全快照, 如 device 示例每帧 `monitor_snapshot()`）;
    `ctx.ui.post(fn)` 帧安全点 `[M1 待]`; 后台线程不得直接触碰 UI 状态。
 6. **视觉**: 强制 UIManager 主题; 窗口默认浮动（用户可手动 dock; 布局 API `[M1 待]`）;
@@ -296,6 +325,7 @@ type 名作为图的持久身份，官方迁移保留旧名（如 `SerialSend`�
 def register() -> dict:
     return {
         "id": "myext", "owner": "myext", "name": "My Extension",
+        "signature": "@ACME",   # 节点卡标题下灰色提供者签名
         "nodes": [{
             "type": "ext.myext.MyNode", "label": "My Node", "category": "MyExt",
             "color": (0.5, 0.7, 0.9),
@@ -312,7 +342,10 @@ def register() -> dict:
 - `fields` 由 Node Editor 通用控件渲染（text/int/float/bool/enum/serial_port），
   扩展无需 import Editor / imgui；
 - evaluator 必须是确定性纯函数（干跑也走它）；未安装 pack 的图应显示 missing extension（M3）；
-- **Agent 发现**: `graph.types`（含 type/label/category/owner/pins），`extension.list` 也返回
+- **提供者签名**: pack 可写 `signature`（如 `@Official` / `@ACME`）；缺省扩展节点为
+  `@Community`，核心节点默认 `@Official`。签名显示在节点标题下一行（灰色），不写进
+  `props_text`/description，也不从本地路径自动推断。
+- **Agent 发现**: `graph.types`（含 type/label/category/owner/signature/pins），`extension.list` 也返回
   `extensions[].nodes`；`graph.add` 可直接添加未连线节点（节点池）并返回 pins。
 - 内置 pack 在扩展 disable 后仍保留（节点类型属于图可加载性）；运行期 `ctx.nodes` 注册的 pack
   在 unload 时反注册。
@@ -369,7 +402,7 @@ def register() -> dict:
 
 ## 11. 设置与数据目录
 
-- 可写状态一律 `ctx.data_dir`（`Application/Editor/Config/extensions_data/<id>/`, 随启用状态独立）。
+- 可写状态一律 `ctx.data_dir`（默认 `%APPDATA%/FlyVibingEngine/extensions_data/<id>/`，随启用状态独立；测试/部署可用 `FVE_EXTENSIONS_DATA` 或旧 `MGE_EXTENSIONS_DATA` 覆盖）。
 - `[M1]` `ctx.settings(schema)` 落地后: schema 自动生成设置 UI + 持久化, 禁止自建配置文件到其它位置。
 
 ## 12. 测试规范（扩展必带自测）
