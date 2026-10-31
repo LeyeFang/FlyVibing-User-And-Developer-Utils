@@ -51,7 +51,7 @@
 ```
 
 - **硬约束**: TrainFBCSP 必须挂**可重复触发链**（帧链/门控链）; OnGameStart-only 链会永久卡住
-  （与 TimeDelay 同病, 引擎现状）;
+  （同类注意事项：`TimeDelay` 已从引擎移除）;
 - worker 线程绝不触碰 ctx/evaluator（只写锁保护的任务槽 — 自由线程纪律）;
 - 干跑一律同步训练（确定性）; 长时间训练不进框架 → `mode=load` + `model_path`（离线流水线入口）,
   train 模式 `save_path` 导出 npz 供离线复用。

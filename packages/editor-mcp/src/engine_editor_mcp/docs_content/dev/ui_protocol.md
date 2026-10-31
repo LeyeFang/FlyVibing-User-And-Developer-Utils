@@ -274,6 +274,7 @@
 | `extension.disable` | Extensions 菜单 ▸ 取消勾选 | 勾选态、卸载 + 扩展 op 注销 | D + C |
 | `settings.get` | Settings 面板 ▸ Common（选项本体） | 无（只读） | D |
 | `settings.set` | Settings 面板 ▸ Common / Export；Edit ▸ Preferences… | 控件值即时反映新值；字体缩放/语言在下一渲染帧生效（含面板标题） | D + Q |
+| `device.save` | —（agent / 节点 `SaveDeviceData` 同实现） | 返回 paths / meta_path / samples / duration_s / written / scope；不改变录制状态 | — |
 | `frame.request` / `frame.fetch` | —（内部；`engine_capture` 封装） | — | — |
 | `editor.quit` | 窗口关闭按钮 | 全链清理退出（PIE 先行停止） | — |
 

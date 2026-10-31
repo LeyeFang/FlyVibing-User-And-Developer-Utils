@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "flyvibing-extension-kit"
-version = "0.1.0"
+version = "0.1.1"
 description = "Extension author kit: static reviewer (M/C rules) + headless imgui test helper (ini-safe)"
 readme = "README.md"
 requires-python = ">=3.10"

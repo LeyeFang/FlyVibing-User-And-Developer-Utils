@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "flyvibing-node-editor"
-version = "0.1.0"
+version = "0.1.1"
 description = "Offline node-graph tool: experiment spec -> graph JSON -> .scene injection (+ sectioned rules reference)"
 readme = "README.md"
 requires-python = ">=3.10"

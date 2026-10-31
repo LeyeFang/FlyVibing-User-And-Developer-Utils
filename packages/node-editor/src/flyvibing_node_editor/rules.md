@@ -209,6 +209,7 @@ python -m flyvibing_node_editor.cli group-delete --scene scene.scene --group g1 
 2. One output pin can fan out to **multiple** input pins
 3. One input pin can only receive from **one** output pin
 4. Event nodes have **no** input exec pins (they are graph roots)
+5. Input event nodes: `OnKeyPressed` / `OnKeyReleased` / `OnMouseClicked` also have no input exec pins
 
 ---
 
@@ -217,10 +218,13 @@ python -m flyvibing_node_editor.cli group-delete --scene scene.scene --group g1 
 - **OnGameStart**: fires ONCE. Use for init.
 - **OnFrameUpdate**: fires EVERY FRAME. Use for TimeTrigger, polling.
 - **OnGameStop**: fires ONCE. Use for cleanup.
+- **OnKeyPressed / OnKeyReleased / OnMouseClicked**: fire once per matching input event. `OnMouseClicked` fires on release only when the press moved <= 6 px (drag is not a click). Props: key (`"Space"`/`"A"`/`"Escape"`/code), mods (`any`/`none`/`Shift`/`Ctrl+Shift`), button (`Left`/`Right`/`Middle`/`Any`), repeat (OnKeyPressed only).
 - **Exec chain**: depth-first traversal following exec output→input links.
-- **Pure data nodes** (Constant, Compare, ScalarMath, Random, etc.): NO exec pins. Evaluated LAZILY when their output pin is read via a data link.
+- **Pure data nodes** (Constant, Compare, ScalarMath, Random, IsKeyDown, IsMouseButtonDown, GetMousePosition, etc.): NO exec pins. Evaluated LAZILY when their output pin is read via a data link.
 - **TimeTrigger**: fires when timer ≥ threshold. Re-arms only when threshold increases.
-- **TimeDelay**: blocks exec chain until elapsed.
+  (The engine removed `TimeDelay` — it only advanced when the whole exec chain re-entered
+  every frame, and its duration prop was ignored. Use `TimeTrigger(mode=manual, time=N)`
+  on an `OnFrameUpdate` chain instead.)
 - **Branch**: walks True or False based on Condition data pin.
 - **Variables** persist across frames. VarSet writes, VarGet reads.
 
@@ -234,6 +238,16 @@ python -m flyvibing_node_editor.cli group-delete --scene scene.scene --group g1 
 | OnGameStart | exec | once at start |
 | OnFrameUpdate | exec, delta(float) | every frame |
 | OnGameStop | exec | once at stop |
+| OnKeyPressed | exec, Key(int), Mods(int) | props: key, mods, repeat |
+| OnKeyReleased | exec, Key(int), Mods(int) | props: key, mods |
+| OnMouseClicked | exec, Button/Mods/X/Y(int) | props: button, mods |
+
+### Input data (pure data, no exec)
+| type_name | output | props |
+|-----------|--------|-------|
+| IsKeyDown | Down(int 0/1) | key |
+| IsMouseButtonDown | Down(int 0/1) | button |
+| GetMousePosition | X(int), Y(int) | — |
 
 ### Flow
 | type_name | input | output | props |
@@ -316,6 +330,9 @@ python -m flyvibing_node_editor.cli group-delete --scene scene.scene --group g1 
 | SerialSend | exec_in, Value(var) | exec_out | format: string/bytes, port, baud_rate |
 | PathVar | — | Path(string) | browse_mode: directory/file, path |
 | TextFileWrite | exec_in, FilePath, FileName, Value | exec_out | mode: pin, write_mode: w/a, delimiter |
+| SaveData | exec_in, Data(var), FilePath, FileName | exec_out, Path, MetaPath, Rows, Cols, Samples, Written, Ok | mode, format: npz/npy/csv/json, file_path, file_name, unique, tag, key, compress, save_meta, csv_delimiter, csv_header, csv_mode, json_indent, value |
+
+`SaveData` is the algorithm-facing data path; `TextFileWrite` remains for human-readable `.txt` logs. `Data` accepts arrays/lists/scalars/dicts; dict → NPZ arrays or CSV columns. `unique=true` appends timestamp/tag; dry-run only plans path/counts.
 
 ### SigGen (虚拟信号发生器 — IO ▸ SigGen)
 | type_name | input | output | props |

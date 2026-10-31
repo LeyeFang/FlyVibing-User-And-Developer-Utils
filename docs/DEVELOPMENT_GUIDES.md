@@ -13,6 +13,8 @@
 | 给扩展加节点 | [节点开发指南](../packages/editor-mcp/src/engine_editor_mcp/docs_content/extdev/node_development.md) | `engine-editor-cli doc outline extdev/node_development` |
 | 做一个官方/用户 Example | [Example 开发指南](../packages/editor-mcp/src/engine_editor_mcp/docs_content/extdev/example_development.md) | `engine-editor-cli doc outline extdev/example_development` |
 | 在用户目录注入自己的 Example（不污染主线） | [Example 开发指南 §1.1](../packages/editor-mcp/src/engine_editor_mcp/docs_content/extdev/example_development.md) | 写入 `%APPDATA%/FlyVibingEngine/examples/<Name>/`，`.myproj` 加 `provider` |
+| 让扩展自带 Example（推荐，零拷贝） | [Example 开发指南 §1.2](../packages/editor-mcp/src/engine_editor_mcp/docs_content/extdev/example_development.md) | 放 `<extension_dir>/Examples/<Name>/`；额外根目录用 `capabilities:["examples"]` + `ctx.examples.register` |
+| 在图中保存设备录制（不停采） | [设备 IO 协议 §3](../packages/editor-mcp/src/engine_editor_mcp/docs_content/dev/device_io_protocol.md) | 节点 `SaveDeviceData`（Device ▸ Save）或 `engine-editor-cli call device.save ...`；`pump` 后落盘 |
 | 端到端实验流程 | [TUTORIAL.md](TUTORIAL.md) | `engine-editor-cli doc outline dev/...`（内部协议） |
 | 扩展静态审查 | [extension-kit README](../packages/extension-kit/README.md) | `flyvibing-review <extension-dir>` |
 | 离线节点图工具 | [node-editor README](../packages/node-editor/README.md) | `flyvibing-node-editor --help` |

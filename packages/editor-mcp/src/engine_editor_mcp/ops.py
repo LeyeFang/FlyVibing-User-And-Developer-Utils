@@ -1,7 +1,7 @@
 """Op registry — 编辑器 Live op 的单一事实源（CLI / 精简 MCP / 文档生成共用）。
 
 数据来源与责任:
-  - 引擎侧实现: Application/Editor/Services/LiveCommandServer.py `_register_ops()`（69 ops）;
+  - 引擎侧实现: Application/Editor/Services/LiveCommandServer.py `_register_ops()`（71 ops）;
   - 本注册表是 agent 侧（CLI/MCP/Skill）的唯一元数据来源;
   - 新增 op 时: 引擎侧注册实现 → 本表加条目 → `python -m engine_editor_mcp.docgen` 重生成 ops.md;
   - 完整性由 Test/Application/Editor/test_editor_mcp_package.py 对照引擎源码守卫。
@@ -41,6 +41,7 @@ class OpSpec:
 
 CATEGORY_ORDER = [
     ("sim", "运行控制"),
+    ("device", "设备会话"),
     ("view", "视图 / 摄像机"),
     ("ui", "界面面板"),
     ("renderer", "渲染器诊断"),
@@ -66,6 +67,14 @@ OPS: dict[str, OpSpec] = {o.name: o for o in [
     OpSpec("sim.play", "sim", "启动 PIE（等同 Run 按钮）"),
     OpSpec("sim.stop", "sim", "停止 PIE（等同 Stop 按钮）"),
     OpSpec("sim.state", "sim", "查询模拟状态（state / runtime_alive）"),
+    # ── device ──
+    OpSpec("device.save", "device", "不停采保存设备录制（session/buffer；返回 paths/samples/written）",
+           (Param("device", "str", False, "会话名（省略 = 自动绑定唯一会话）"),
+            Param("save_scope", "enum", False, '"session"（默认）/ "buffer"'),
+            Param("elapsed_s", "float", False, "保存前 pump 到的仿真时间（可选）"),
+            Param("tag", "str", False, "文件名标签（可选）"),
+            Param("pool", "str", False, "池作用域（可选）"),
+            Param("pump", "bool", False, "保存前补齐数据（默认 true）"))),
     # ── view / camera ──
     OpSpec("view.set_mode", "view", "设置 Scene Type（3d / 2d / overlay；含 game_type + 视口）",
            (Param("mode", "enum", True, '"3d" / "2d" / "overlay"'),)),

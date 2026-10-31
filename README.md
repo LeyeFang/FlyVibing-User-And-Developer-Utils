@@ -47,7 +47,7 @@ This synchronizes the skills into `editor-mcp` and `node-editor`, builds the thr
 ## Releases
 
 The toolchain is distributed as a zip archive; it does not use an installer
-executable. The current release is **0.5.0**:
+executable. The current release is **0.6.0**:
 
 ```powershell
 python scripts/release_tools.py
@@ -56,9 +56,9 @@ python scripts/release_tools.py
 The command rebuilds the wheels and writes:
 
 ```text
-dist/releases/v0.5.0/any/
-    FlyVibing-Tools-0.5.0.zip
-    FlyVibing-Tools-0.5.0.zip.sha256
+dist/releases/v0.6.0/any/
+    FlyVibing-Tools-0.6.0.zip
+    FlyVibing-Tools-0.6.0.zip.sha256
     release-manifest.json
 ```
 

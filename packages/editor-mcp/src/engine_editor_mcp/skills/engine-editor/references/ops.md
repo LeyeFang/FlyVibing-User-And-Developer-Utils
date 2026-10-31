@@ -24,6 +24,21 @@
 
 - 示例: `engine-editor-cli call sim.state`
 
+## 设备会话
+
+### `device.save`
+
+不停采保存设备录制（session/buffer；返回 paths/samples/written）
+
+- `device` (str, 可选) — 会话名（省略 = 自动绑定唯一会话）
+- `save_scope` (enum, 可选) — "session"（默认）/ "buffer"
+- `elapsed_s` (float, 可选) — 保存前 pump 到的仿真时间（可选）
+- `tag` (str, 可选) — 文件名标签（可选）
+- `pool` (str, 可选) — 池作用域（可选）
+- `pump` (bool, 可选) — 保存前补齐数据（默认 true）
+
+- 示例: `engine-editor-cli call device.save device=VALUE save_scope="mesh"`
+
 ## 视图 / 摄像机
 
 ### `view.set_mode`

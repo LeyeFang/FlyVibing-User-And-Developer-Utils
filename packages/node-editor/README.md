@@ -92,7 +92,7 @@ ops 与 bench 的 patch DSL 同语义：
 
 默认不写文件；`ok=false` 时返回 `op_errors` + `validation_errors`，可直接喂给下一轮模型。
 
-回答“这么连会什么顺序”：`Branch` 两路标出条件来源、`TimeTrigger`/`TimeDelay` 标 `[GATE]`、
+回答“这么连会什么顺序”：`Branch` 两路标出条件来源、`TimeTrigger` 标 `[GATE]`、
 `ExitGame` 标 `[TERMINAL]`、环标 `[CYCLE]`；行输出有预算上限，保证不会一把塞满上下文。
 
 ## 节点别名

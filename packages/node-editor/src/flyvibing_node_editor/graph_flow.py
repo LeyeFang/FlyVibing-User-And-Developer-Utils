@@ -16,7 +16,7 @@
           #224 VarSet trial=1
     - 缩进 2 空格/层
     - `<pin>` 前缀表示经由哪个 exec 输出进入
-    - `[GATE]` = 运行时可能阻塞（TimeTrigger 未到阈值 / TimeDelay 未到期 / 一次性训练节点）
+    - `[GATE]` = 运行时可能阻塞（TimeTrigger 未到阈值 / 一次性训练节点）
     - `[TERMINAL]` = 执行到此结束
     - `[RE-ENTRY]` = 同一 tick 内该节点已执行过（引擎 `_exec_visited` 会跳过）
 
@@ -34,7 +34,6 @@ from flyvibing_node_editor.node_graph_validator import extract_graph_data
 # 运行时会阻塞的节点类型（静态分析只标注，不判定实际是否放行）
 GATE_TYPES = {
     "TimeTrigger": "thr",
-    "TimeDelay": "delay",
     "TrainFBCSP": "one-shot",
 }
 
@@ -48,7 +47,6 @@ _DEAD_END_WORTHY = {"OnGameStart", "OnFrameUpdate", "OnGameStop", "Sequence", "B
 # 节点行尾部提示：{type: 从 props 提取哪些键}
 _PROP_HINTS = {
     "TimeTrigger": ("time", "timer"),
-    "TimeDelay": ("delay",),
     "VarSet": ("var_name", "value"),
     "VarGet": ("var_name",),
     "Constant": ("value",),

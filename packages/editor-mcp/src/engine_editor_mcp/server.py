@@ -74,7 +74,7 @@ __all__ = [
     "main",
 ]
 
-mcp = FastMCP("Engine Editor Live", version="0.5.0")
+mcp = FastMCP("Engine Editor Live", version="0.6.0")
 
 # ── 低层函数（v0.4.0 起实现位于 client.py; 此处保留模块级名以兼容 shim / E2E 脚本）──
 

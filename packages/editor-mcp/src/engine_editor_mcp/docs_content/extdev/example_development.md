@@ -53,7 +53,8 @@ rst/<Name>/
 }
 ```
 
-- `File ▸ Open Example` 会扫描官方 `Examples/`、测试夹具和用户目录；
+- `File ▸ Open Example` 会扫描官方 `Examples/`、测试夹具、用户目录，以及已启用扩展
+  自动登记的 `<extension_dir>/Examples/`（§1.2）；
   项目名后显示灰色 `@ACME`。未写 `provider` 的用户示例默认显示 `@Community`，
   不会冒充官方。
 - 也可直接打开：`engine-editor-cli call project.open path="%APPDATA%/FlyVibingEngine/examples/MyTask/MyTask.myproj"`。
@@ -62,6 +63,45 @@ rst/<Name>/
   要给别人用，走 `project.export` 的用户态游戏包，并让使用到的扩展显式声明
   `signature`/`export`。
 - 不要把社区扩展放进 `Application/Functions/`；安装包只按 mainline allowlist 分发。
+
+## 1.2 扩展自带 Example（推荐）
+
+如果 Example 依赖某个扩展的节点/设备，把示例放在扩展目录里，不要复制到用户目录：
+
+```text
+<extension_dir>/Examples/<Name>/
+  <Name>.myproj
+  scenes/*.scene
+  README.md
+```
+
+- 扩展 **enable** 时宿主自动登记 `<extension_dir>/Examples`；`File ▸ Open Example`
+  立即出现，扩展 **disable/unload** 时自动移除。无需改 manifest，也无需复制文件。
+- 引擎只读扩展目录，**不写用户示例目录**：不会覆盖用户自建同名示例，也不会在
+  卸载后留下副本。
+- 签名默认取扩展 manifest 的 `provider`（缺省 `@<id>`）；单个 `.myproj` 仍可用
+  `provider` 覆盖。菜单显示为 `Name @Provider`，重名但不同提供者靠灰色签名区分。
+- 若示例根目录不在扩展目录下（例如多个扩展共享的 fixture），在 manifest 声明：
+
+```json
+{
+  "capabilities": ["examples"]
+}
+```
+
+  然后在 `on_load(ctx)` 中登记/撤销：
+
+```python
+def on_load(self, ctx):
+    ctx.examples.register(os.path.join(ctx.extension_dir, "shared_examples"),
+                          provider="@ACME")
+```
+
+- 宿主在 unload/disable 时自动清空该扩展登记的全部根目录；扩展不需要自己实现
+  拷贝、判重、版本更新或清理。旧式 `.injected.json` 注入副本在源扩展根目录仍
+  注册时会被菜单忽略，避免出现两份同名示例。
+- 扩展示例是**本机运行时资产**：不要把 `export:false` 扩展的示例放进主线 `Examples/`，
+  也不要指望它进入安装包；跨机器交付走 `project.export` 游戏包或单独分发扩展。
 
 ## 2. 推荐构建顺序
 

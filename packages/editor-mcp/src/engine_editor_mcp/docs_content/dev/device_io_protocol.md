@@ -45,14 +45,53 @@
   - `npz`：keys = `data / fs / channel_names / serial / duration_s`（压缩）；
   - `csv`：首行 `sample,<ch names...>`，行 = 采样点；
   - 两种格式都附同名 `.json` 元数据（设备信息、滤波器索引、起止时间、模式 stub/device、文件清单）。
-  - 文件名：`<安全化设备名>_<YYYYmmdd_HHMMSS>.<ext>`；目录来自 Init 节点 `save_dir`
-    （默认 `.` = 当前目录）。
+  - 文件名：`<安全化设备名>_<YYYYmmdd_HHMMSS_ffffff>[_<tag>].<ext>`；目录来自 Init 节点
+    `save_dir`（默认 `.` = 当前目录）。时间戳含微秒，文件名已存在时追加 `_2/_3…`；
+    同一秒内连续保存不会互相覆盖（`SaveDeviceData.tag` 也会进入文件名与元数据）。
 - **附加通道（触发合成列, 2026-10-16）**：硬件块可带 +1 列（16 线触发合并）——显示/节点只消费
   EEG 主通道，录制保留原列（`channel_names` 末列 `TRIG`）；事件通路 = `get_trigger_events`
   （沿变检出 `[{sample, t_s, code}]`，增量游标）+ 落盘元数据 `trigger_events`；无硬件回归用
   合成触发源 `SigGenConfig.trigger_every_s`。
 - Stop 语义：`save_scope=session` 保存 Start 以来全部数据（内存拼接，受
   `MAX_RECORD_BYTES = 2 GiB` 保护，超限仅窗口继续更新）；`save_scope=buffer` 只保存当前窗口。
+- **不停采保存 (2026-10-31)**：`RecordingSession.save(scope, elapsed_s, pump=True, tag="")`、
+  门面 `save_record(...) -> (ok, detail, info)`、图节点 `SaveDeviceData`、agent op
+  `device.save` 共用同一实现。`pump=True` 时先按 `elapsed_s` 补齐后端数据再取快照，
+  因此文件样本数与同刻 `GetData` / `sample_count` 对齐；保存**不改变**会话状态
+  （仍为 `recording`，采样继续增长）。
+  - 节点输出：`Path / MetaPath / Samples / Duration / Written / Ok`；干跑时
+    `Written=0`、只计算路径、不落盘。
+  - **典型链路（时间推进必须由帧链驱动）**:
+
+    ```
+    OnGameStart   → InitDevice → StartRecord（record=true）
+    OnFrameUpdate → TimeTrigger(mode=manual, time=2.0) → SaveDeviceData → GetData → …
+    OnFrameUpdate → TimeTrigger(mode=manual, time=4.0) → StopRecord(save=false)
+    ```
+
+    `TimeDelay` 已从引擎**移除** —— 它只有整条 exec 链被逐帧重入时才推进，
+    且时长只读 `Seconds` 输入引脚（`props.duration` 不生效）。时间推进统一用
+    `TimeTrigger(mode=manual, time=N)` 挂在 `OnFrameUpdate` 链上（同 `TrainFBCSP`
+    的硬约束，见 `bci_algorithm_protocol.md` §4）。旧场景里的 `TimeDelay` 节点加载时
+    会被保留并告警，需手动改成上述链路。
+  - 扩展自带同构节点：`ext.gtec.SaveData`（Gtec 扩展，v0.10.1）= 同一套语义/引脚，
+    便于扩展示例在本地闭环（`Doc/VIRTUAL_DEVICE_FROZEN.md`）。
+  - 保存后再读 `GetData`，可用文件 `TRIG` 列与矩阵末行互证；**注意**矩阵末行是
+    由事件**重建**的 10 ms 脉冲（非硬件原列），码值与上升沿一致、**脉冲宽度允许不同**。
+    另：模拟器在 `trigger_every_s=0` 时**不产生**附加触发列，落盘只有 `channels` 列。
+  - `device.save` 参数：`device`（空 = 自动绑定唯一会话）、`save_scope`
+    （`session|buffer`）、`elapsed_s`、`tag`、`pool`、`pump`。
+  - 兼容旧式 vendor：session.save 若只接受 `scope`，门面会先调用公开的
+    `get_data(elapsed_s)` 完成 pump，再调用其 `save(scope)`。
+- **范式级数据分层（block / trial）**：
+  - **block** = 一段连续录制。`SaveData(tag=blockN)` 产生的是**累积快照**
+    （`save_scope=session` 始终是 Start 以来的全部数据）→ 校验口径 = 行数单调 +
+    后一份的前 N 行与前者逐位相等 + 事件序列前缀一致；
+  - **trial** = 以触发事件（cue）锁定的窗口，用 `EpochAppend`（`Data`/`Samples`/`Fs`/`Label`）
+    累积、`EpochSave` 落盘为 `X (epochs, channels, ≤samples)` + `lengths` + `y` + `fs`；
+    cue 起点取落盘 json 的 `trigger_events[].sample`，尾部不足一窗的 event 丢弃。
+  - 离线校验工具（Gtec 扩展提供）: `gtec_data_verify.py --epochs/--blocks`、
+    `gtec_paradigm_verify.py`（采集+落盘+互证一体）。
 - `close_all()`：Runtime 停止安全网（**不保存**，丢弃数据）；由 `GameRuntime.start/stop` 调用。
 
 ---

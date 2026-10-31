@@ -11,7 +11,7 @@
     M2 id 合法（^[a-z][a-z0-9_]*$）
     M3 api_version 与宿主兼容（前缀 "1"）
     M4 entry 格式合法且文件存在（无 entry = planned/partial 允许）
-    M5 capabilities 取值合法（ops/ui/nodes/threads/jobs/settings/device）
+    M5 capabilities 取值合法（ops/ui/nodes/threads/jobs/settings/device/graph/examples）
     M6 description 非空（菜单 tooltip）
 
   [code]（entry 存在时静态扫描）
@@ -42,7 +42,7 @@ import os
 import re
 import sys
 
-_CAPABILITIES = {"ops", "ui", "nodes", "threads", "jobs", "settings", "device", "graph"}
+_CAPABILITIES = {"ops", "ui", "nodes", "threads", "jobs", "settings", "device", "graph", "examples"}
 _ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _IMPORT_RE = re.compile(
     r"^\s*from\s+(Application[\w\.]*)\s+import|^\s*import\s+(Application[\w\.]*)", re.M)

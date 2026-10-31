@@ -46,7 +46,7 @@ python scripts/build_tools.py
 
 ## 发布包
 
-工具链以 zip 压缩包发布，不使用 exe 安装器。当前版本为 **0.5.0**：
+工具链以 zip 压缩包发布，不使用 exe 安装器。当前版本为 **0.6.0**：
 
 ```powershell
 python scripts/release_tools.py
@@ -55,9 +55,9 @@ python scripts/release_tools.py
 命令会重建三个 wheel，并输出：
 
 ```text
-dist/releases/v0.5.0/any/
-    FlyVibing-Tools-0.5.0.zip
-    FlyVibing-Tools-0.5.0.zip.sha256
+dist/releases/v0.6.0/any/
+    FlyVibing-Tools-0.6.0.zip
+    FlyVibing-Tools-0.6.0.zip.sha256
     release-manifest.json
 ```
 

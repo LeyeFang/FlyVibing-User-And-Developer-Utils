@@ -104,7 +104,8 @@ engine-editor-cli call ext.mything.info                # 扩展 op 直接可调�
 | `maturity` | ✅ | `planned` / `skeleton` / `partial` / `stable` — 菜单与 `extension.list` 展示 |
 | `entry` | 有代码则必填 | `"extension.py:create_extension"` 形式; **文件缺失 → broken**; 省略 = 仅计划（不可启用） |
 | `description` | 建议 | 菜单 tooltip / 文档 |
-| `capabilities` | 建议 | 声明所需能力。**合法值集**（与审查器 M5 同源）: `ops` / `ui` / `nodes` / `threads` / `jobs` / `settings` / `device` / `graph`。语义见 §6 能力表；`requires` 暂仅解析展示（依赖拓扑 M3） |
+| `provider` | 可选 | 扩展自带的 Example/节点默认签名（`@ACME`）；缺省 `@<id>`。单个 `.myproj` / 节点仍可用自身 `provider`/`signature` 覆盖 |
+| `capabilities` | 建议 | 声明所需能力。**合法值集**（与审查器 M5 同源）: `ops` / `ui` / `nodes` / `threads` / `jobs` / `settings` / `device` / `graph` / `examples`。语义见 §6 能力表；`requires` 暂仅解析展示（依赖拓扑 M3） |
 | `export` | 可选 | 默认 `true`。仅控制 **游戏导出**：`false` = 该扩展目录不进入 `File ▸ Export` 游戏层（即使场景用到其节点也会告警并排除）；**不影响安装包**——安装包按 `Application/Functions/official_extensions.json` mainline allowlist 分发。导出清单 `export_excluded` 会记录路径 |
 
 **状态语义**（`extension.list` / 菜单）: `planned`（无 entry）· `disabled`（可装载未启用）·
@@ -143,7 +144,7 @@ rescan:  已装载者全部 unload 后重新扫描（Extensions 菜单 ▸ Resca
 | `ctx.ui.post(fn)` | `[M1]` | 后台线程 → 渲染线程帧安全点 |
 | `device`（能力键, **非** ctx 对象） | ✅ M0 | 语义 = **允许导入设备门面** `Application.Functions.VirtualDevice`（在 C6 白名单内）；**不提供 `ctx.device`**（不扩大 API 面）; 三模式（sim/device/virtual）与无硬件验收通道见 `Doc/Dev/device_io_protocol.md` §7 |
 | `ctx.graph`（能力键 `graph`） | ✅ M1 (2026-10-29 扩展) | **受限图访问** — `nodes()` / `owned_nodes()` / `find(...)` / `find_type(...)` 读取；`add_node` / `update_node` / `set_props` / `replace_props` / `remove_node` / `add_link` / `remove_link` 写入；`request_redraw()` 触发编辑器重绘。默认只允许创建/改写/删除本扩展 owner 的节点，连线至少一端属于本扩展。**不 import 编辑器层**（`ExtensionGraph` 转发到编辑器单一入口）。未声明 `graph` 时 `ctx.graph is None` |
-
+| `ctx.examples`（能力键 `examples`） | ✅ M1 (2026-10-30) | **扩展示例根目录** — `register(root, provider=None)` / `unregister(root)` / `roots()`。扩展自带 `<extension_dir>/Examples/` 在 enable 时由宿主自动登记（无需 capability）；声明 `examples` 后才注入 `ctx.examples`，用于追加额外根目录。宿主只读、不复制；disable/unload 时自动移除本扩展全部根目录。未声明 `examples` 时 `ctx.examples is None`；`.myproj.provider` 优先于 manifest `provider`，缺省 `@<id>` |
 > 能力键 `device` 与其它行的区别: 前几行是"宿主注入的 ctx 能力对象", `device` 是**导入许可声明**
 > （2026-10-12 裁决）。
 
@@ -171,6 +172,26 @@ ctx.graph.request_redraw()
 跨扩展/core 节点会抛 `PermissionError`。读取接口默认返回全图快照，可用
 `owned_only=True` 或 `type_prefix="ext.acme."` 缩小范围。所有写入都在主线程
 （扩展 `on_load` / ops / UI 回调）执行，不要从后台线程改图。
+
+### 6.2 `ctx.examples` 示例（只读示例根目录）
+
+扩展自带示例放在 `<extension_dir>/Examples/<Name>/` 时，enable 后自动出现在
+`File ▸ Open Example`，不需要声明能力，也不需要复制到用户目录。若还要登记额外
+根目录，在 manifest 声明能力并在 `on_load` 中调用：
+
+```python
+# extension.json: "capabilities": ["examples"]
+def on_load(self, ctx):
+    ctx.examples.register(os.path.join(ctx.extension_dir, "shared_examples"),
+                          provider="@ACME")
+```
+
+- `register(root)` 的根目录必须已存在；引擎只读，不会修改扩展目录。
+- 单个 `.myproj` 的 `provider` / `signature` / `author` 优先；否则用 manifest
+  `provider`，再缺省 `@<id>`。同名示例若提供者不同，菜单用灰色签名区分。
+- 禁用/卸载扩展会移除其全部示例根目录；不要自行复制到
+  `%APPDATA%/FlyVibingEngine/examples`。旧式 `.injected.json` 副本在源根目录仍
+  注册时会被菜单忽略。
 
 ## 7. UI 规范（`ctx.ui` — `register_window` 已实装 2026-10-11）
 
@@ -456,6 +477,9 @@ def register() -> dict:
 - [ ] （UI 扩展）继承 `UIExtensionBase` + 声明 `close_policy` + 实现 `on_ui_event` 收尾;
       imgui 窗口栈配对纪律（`begin_child` 无条件配对 — §7 第 7 条）;
       `python FlyVibing-User-And-Developer-Utils/packages/extension-kit/review_extension.py <扩展目录>` 无 FAIL
+- [ ] （示例扩展）自带 `<extension_dir>/Examples/<Name>/` 可被 `File ▸ Open Example`
+      发现；不要把示例复制到用户目录；需要额外根目录时声明 `capabilities:["examples"]`
+      并用 `ctx.examples.register`，确认 disable/unload 后条目消失（§6.2）
 - [ ] `extension.enable` → `extension.list` 显示 enabled + ops 齐全 → 逐 op 实调通过
 - [ ] 自带测试按 `test_protocol.md` 契约全绿; 未破坏核心计数守卫
 - [ ] `TODO.md` 状态更新（maturity 与清单勾选）

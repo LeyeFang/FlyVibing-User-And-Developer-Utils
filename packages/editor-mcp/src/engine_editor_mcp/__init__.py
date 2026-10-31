@@ -8,11 +8,11 @@
 两侧设置一致可改端口）。纯 socket 客户端 — 不依赖引擎源码, 可放入任何三方项目
 工作区使用（独立分发）。
 
-v0.5.0: 双档位（lite 6 工具 / full 46 工具）+ CLI + Skill; 新增引擎启动/自动端口协商
+v0.6.0: 双档位（lite 6 工具 / full 46 工具）+ CLI + Skill; 新增引擎启动/自动端口协商
 （`launch` / `engines` / MCP `engine_launch`）; op 注册表见 ops.py。
 """
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 from .server import mcp  # noqa: E402,F401
 
