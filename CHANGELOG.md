@@ -5,6 +5,7 @@ independently; the toolchain release version is stored in `VERSION`.
 
 ## Unreleased
 
+- Added `debug.events` (Settings ▸ Debug ▸ Terminal event reporting) — 75 core ops.
 - Added `graph.remove_node` / `graph.unlink` / `console.tail` to the op registry
   (74 core ops); `references/ops.md` regenerated.
 - `extdev/node_development.md` gained §8 “common graph/entity/time pitfalls”: iterative
@@ -12,6 +13,34 @@ independently; the toolchain release version is stored in `VERSION`.
   state, `entity.add` parenting, editor-vs-GL coordinates, and `console.tail` debugging.
 - `rules.md` / `graph_flow.py`: `TimeDelay` removed, `TimeTrigger` documented as
   edge-triggered.
+
+## 0.6.1 (2026-11-01)
+
+Toolchain release aligned with FlyVibingEngine 1.0.4 (unreleased) — tooling-friction fixes.
+
+- **Errors are now machine-readable.** `engine-editor-cli` writes a structured failure
+  receipt to **stdout** (`{"ok": false, "error": "unknown_op", "op": ..., "suggest": [...]}`)
+  and keeps stderr for human text only, so `2>$null` can no longer hide real errors.
+  Exit codes stay 0 / 1 (op or connection failure) / 2 (usage, unknown op).
+- **Silenced the startup warning.** Importing the MCP server no longer prints
+  `pydantic_settings` `IncompleteFieldDefinitionWarning` on every CLI call.
+- **Copy-pasteable examples.** `help <op>` shows real examples (`graph.link`,
+  `graph.unlink`, `graph.remove_node`, `entity.transform`, `entity.add`, `scene.switch`,
+  `entity.list`, `debug.events`); JSON placeholders prefer the literal written in the
+  parameter docs instead of `{"k":1}`.
+- **Coordinates are stated.** `entity.transform` documents editor coordinates (X right /
+  Y forward / Z up, degrees) vs the GL order stored in `.scene`.
+- **`entity.list with_transform=true`** — positions in one call instead of one
+  `entity.get` per entity.
+- **`scene.switch reload=true`** — the op never writes to disk; use `reload` (or
+  `scene.load`) after editing a `.scene` file by hand.
+- **`sim.play` pre-flight** — refuses to start when the graph contains unregistered node
+  types (they are not evaluated, so the chain would break silently); `force=true` overrides.
+- **Docs** — new topic `dev/scene_format` (`.scene` schema, `links` pin-id vs `graph.link`
+  pin names, editor vs GL coordinates, hand-edit workflow) with an engine stub; CLI output
+  contract + `probe`/`capture` framing in `dev/editor_live_protocol`; dev-vs-release
+  extension loading in `extdev/extension_dev_protocol` §3.1; PATH guidance and the
+  `engine-cli.cmd` / `engine-cli.sh` wrappers (shipped in the release zip).
 
 ## 0.6.0 (2026-10-31)
 

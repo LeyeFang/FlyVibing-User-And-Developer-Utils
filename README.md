@@ -47,7 +47,7 @@ This synchronizes the skills into `editor-mcp` and `node-editor`, builds the thr
 ## Releases
 
 The toolchain is distributed as a zip archive; it does not use an installer
-executable. The current release is **0.6.0**:
+executable. The current release is **0.6.1**:
 
 ```powershell
 python scripts/release_tools.py
@@ -56,9 +56,9 @@ python scripts/release_tools.py
 The command rebuilds the wheels and writes:
 
 ```text
-dist/releases/v0.6.0/any/
-    FlyVibing-Tools-0.6.0.zip
-    FlyVibing-Tools-0.6.0.zip.sha256
+dist/releases/v0.6.1/any/
+    FlyVibing-Tools-0.6.1.zip
+    FlyVibing-Tools-0.6.1.zip.sha256
     release-manifest.json
 ```
 
@@ -80,6 +80,32 @@ engine-editor-cli call entity.add name=Cue
 engine-editor-cli validate
 engine-editor-cli capture pie --out frame.png
 ```
+
+#### CLI on PATH
+
+The console script lives in the interpreter's scripts directory
+(`<venv>\Scripts\engine-editor-cli.exe` on Windows, `<venv>/bin/engine-editor-cli`
+elsewhere) and is usually **not** on `PATH`. Three options, cheapest first:
+
+1. Use the bundled wrapper (works without touching `PATH`; ships in the release zip):
+   ```powershell
+   engine-cli.cmd call sim.state          # Windows
+   ./engine-cli.sh call sim.state         # macOS / Linux
+   ```
+2. Add the scripts directory to `PATH` for the session:
+   ```powershell
+   $env:PATH = "$env:USERPROFILE\.venv\Scripts;$env:PATH"
+   ```
+3. Call it through the module (no wrapper needed):
+   ```powershell
+   python -m engine_editor_mcp.cli call sim.state
+   ```
+
+**Output contract** — stdout is always JSON, including failures
+(`{"ok": false, "error": "unknown_op", "op": "...", "suggest": [...]}`); stderr only
+carries human-readable hints and can be discarded (`2>$null`). Exit codes:
+`0` success, `1` op or connection failure, `2` usage error (unknown op, bad arguments).
+Branch on the exit code rather than grepping output.
 
 Register the MCP server and skills in a workspace:
 

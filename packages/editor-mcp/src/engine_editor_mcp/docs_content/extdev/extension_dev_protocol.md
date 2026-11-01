@@ -94,6 +94,31 @@ engine-editor-cli call ext.mything.info                # 扩展 op 直接可调�
   其余 `Application.*` → 审查器 WARN（人工复核）; 禁止修改 `Application/**`（见 §5 侵入纪律）。
 - 不要把扩展内部文件丢到仓库其它区; 不得修改 `Application/**`（见 §5 侵入纪律）。
 
+### 3.1 开发态 vs 发布态：扩展到底从哪加载（2026-11-01 补）
+
+两种形态的**扫描根不同**，混用是"扩展明明装了却没生效"的最常见原因：
+
+| 形态 | 扩展扫描根 | 典型做法 |
+|---|---|---|
+| 开发仓（dev） | `<EngineRoot>/Application/Functions/<YourPack>/` | 开发时把目录（或 junction）挂到这里，重启编辑器即被发现 |
+| 发布包 / 导出成品（release） | `<InstallRoot>/Application/Functions/<YourPack>/`（随安装包/wheel 一起分发） | 由 `official_extensions.json` allowlist 决定是否打进安装包 |
+
+实操纪律：
+
+1. **开发期用 junction 挂载**，不要复制粘贴 —— 复制会产生两份分叉：
+   ```powershell
+   New-Item -ItemType Junction -Path "C:\WorkSpace\FLY\FlyVibing-Engine\Application\Functions\missssep" `
+            -Target  "C:\WorkSpace\FLY\Phase-Encoded-SSSEP-MI-FlyVibing-Extension\missssep"
+   ```
+2. **迁移到发布形态**时把目录实体拷进 `Application/Functions/`，并在
+   `official_extensions.json` 中登记（不登记 = 不进安装包；`export:false` 只影响**游戏导出**，
+   不影响安装包）。
+3. 场景里留了 `ext.<id>.*` 节点但扩展没启用 → 节点保留但**不求值**：
+   `graph.validate` 报 `unknown_type`，`sim.play` 直接拒绝启动（见 `dev/scene_format` §1）。
+   这是特意的硬拦截 —— 别把它当成"图没生效的玄学"。
+4. `extension.list` 是运行期的唯一事实源（`enabled` / `disabled` / `broken`）；`broken`
+   的 `error` 字段会给出 manifest / import 的具体原因。
+
 ## 4. manifest 参考（extension.json）
 
 | 字段 | 必填 | 说明 |

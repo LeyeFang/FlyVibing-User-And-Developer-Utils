@@ -276,6 +276,7 @@
 | `extension.disable` | Extensions 菜单 ▸ 取消勾选 | 勾选态、卸载 + 扩展 op 注销 | D + C |
 | `settings.get` | Settings 面板 ▸ Common（选项本体） | 无（只读） | D |
 | `settings.set` | Settings 面板 ▸ Common / Export；Edit ▸ Preferences… | 控件值即时反映新值；字体缩放/语言在下一渲染帧生效（含面板标题） | D + Q |
+| `debug.events` | Settings ▸ Debug ▸ Terminal（开关 + 事件类型勾选） | 勾选变化即时生效；未勾选的事件不打印且不 consume（与旧 `_SILENT_EVENTS` 同行为） | D |
 | `device.save` | —（agent / 节点 `SaveDeviceData` 同实现） | 返回 paths / meta_path / samples / duration_s / written / scope；不改变录制状态 | — |
 | `console.tail` | —（agent 诊断；stdout/stderr tee 环形缓冲） | 返回 seq/level/text 行（since 增量轮询） | — |
 | `frame.request` / `frame.fetch` | —（内部；`engine_capture` 封装） | — | — |

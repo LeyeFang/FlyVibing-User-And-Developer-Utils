@@ -238,10 +238,13 @@ python FlyVibing-User-And-Developer-Utils/packages/extension-kit/review_extensio
 `(0, 6, -0)` —— 这是设计，不是轴错位。要直接改 `.scene` JSON 时按 GL 系写；
 改完再打开核对一次 `entity.get`（它返回编辑器坐标）。
 
+完整字段表（`entities` / `node_graph` / `links` 的 dict 结构、`position_*` 与
+`local_pos_*` 必须同改、pin id ↔ 引脚名对照、手动改盘流程）：
+`engine-editor-cli doc show dev/scene_format`。
+
 ### 8.6 设备/外部系统失败：读控制台
 
 节点里的 `print` / `ctx.emit_log` 现在会进 `LogBus` 环形缓冲：
-
 ```text
 engine-editor-cli call console.tail since=0 lines=200
 engine-editor-cli call console.tail level=error

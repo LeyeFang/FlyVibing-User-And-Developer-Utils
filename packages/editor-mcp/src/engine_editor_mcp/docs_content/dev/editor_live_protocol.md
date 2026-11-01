@@ -222,9 +222,23 @@ UI 入口：Node Editor 工具栏 **Validate** 按钮（静态 / 360 帧 / 600 �
   - 工具集裁剪在 `server.py::apply_profile`（幂等; 内部结构不可用时 fail-open）。
 - **CLI**（`engine-editor-cli`, 零常驻上下文成本 — 终端型 agent 首选）：
   `ops` / `help` / `call <op> k=v...` / `batch` / `exec <script.py>`（注入 `engine` 客户端, 脚本内过滤输出）/
-  `validate`（阻塞编排, summary 默认）/ `capture`（只落盘）/ `setup`（向任意工作区装 Skill+mcp.json）/
+  `validate`（阻塞编排, summary 默认）/ `capture`（只落盘）/ `probe`（像素采样）/
+  `setup`（向任意工作区装 Skill+mcp.json）/
   `launch`（启动引擎 + 自动端口握手）/ `engines`（扫描 8977..9076 发现实例）；
   全局 `--port N` 放在子命令前，或 `MGE_EDITOR_MCP_PORT=N`。
+- **CLI 输出契约（2026-11-01 起）**：
+  - **stdout 永远是 JSON**；失败也有回执 `{"ok": false, "error": "...", "detail": "...", ...}`
+    （`error` 取值 `unknown_op` / `bad_args` / `bad_input` / `error`），未知 op 还带 `suggest: [...]`；
+  - **stderr 只有人读提示**，可以整段丢弃（`2>$null` 不会吞掉真错误了）；
+  - **退出码**：`0` 成功 / `1` op 或连接失败（JSON 里有 `error` 键）/ `2` 用法错误（未知 op、参数解析失败）；
+  - 脚本请**判退出码**，不要 grep 输出。
+- **`probe`（像素验证）**：`probe pie --points 400:300;800:450` → 每个点返回 RGBA。
+  `probe` 与 `capture` **共用同一条抓帧流程**（`client.fetch_raw_frame`）：同一 framebuffer、
+  同一缩放、同一**顶左**坐标系，所以"截图目测 → probe 取色"可以直接对上；
+  要精确对位时先用 probe 打一组网格标定。
+  `probe editor` 采的是编辑器视口那块 framebuffer；若整片返回 `[0,0,0,0]`，
+  先用 `renderer.snapshot` 的 `viewport` 核对待采样点是否落在视口内、窗口是否被最小化 ——
+  验证**场景内容**时优先用 `probe pie`。
 - **Skill**（`engine-editor`, 渐进披露）：SKILL.md（通道选择/速查/纪律）+ `references/ops.md`（docgen 生成）
   + `references/workflows.md`（配方）；安装: `engine-editor-cli setup` 或仓库 `install_mcp.py`（同步到 `.github/skills/`）。
 - **帧图像**（`engine_capture`）：request → 轮询 fetch → numpy 翻转（GL bottom-up → top-down，本进程）→

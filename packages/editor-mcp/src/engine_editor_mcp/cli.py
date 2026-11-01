@@ -64,7 +64,20 @@ def _out(obj) -> None:
     sys.stdout.write(json.dumps(obj, ensure_ascii=False) + "\n")
 
 
-def _fail(message: str, code: int = 1) -> int:
+def _fail(message: str, code: int = 1, error: str = "error", **extra) -> int:
+    """失败回执 — **stdout 写结构化 JSON、stderr 写人读信息**。
+
+    设计缘由 (2026-11-01): 以前所有错误只写 stderr，用户为了闭嘴 pydantic 启动警告
+    而统一加 `2>$null`，结果 `unknown op` 这类真错误也被一起丢掉，表现为
+    “命令成功、输出为空”。现在 stdout 永远有一份机器可读的失败回执：
+
+         {"ok": false, "error": "unknown_op", "op": "graph.get", "suggest": [...]}
+
+    stderr 仍写人读提示（不重复 JSON），可以安全地丢弃。
+    """
+    payload: dict = {"ok": False, "error": error, "detail": message.strip()}
+    payload.update(extra)
+    _out(payload)
     sys.stderr.write(message.rstrip() + "\n")
     return code
 
@@ -170,14 +183,19 @@ def cmd_doc(ns) -> int:
 def cmd_call(ns) -> int:
     name, defaults = op_registry.resolve(ns.op)
     if not name:
-        print(op_registry.format_op_help(ns.op), file=sys.stderr)
-        return 2
+        near = op_registry.suggest_ops(ns.op)
+        hint = ("相近: " + ", ".join(near)) if near else "用 `ops` 看全部目录"
+        sys.stderr.write(op_registry.format_op_help(ns.op) + "\n")
+        return _fail(
+            f"unknown op: {ns.op!r} — {hint}", 2,
+            error="unknown_op", op=ns.op, suggest=near,
+        )
     try:
         kv = _parse_kv(ns.kv)
         if ns.json:
             kv = {**_load_json_arg(ns.json), **kv}
     except (OSError, ValueError) as e:
-        return _fail(f"参数解析失败: {e}", 2)
+        return _fail(f"参数解析失败: {e}", 2, error="bad_args", op=name)
     args = dict(defaults)
     args.update(kv)
     result = _send_checked(name, args)
@@ -198,11 +216,12 @@ def cmd_batch(ns) -> int:
             with open(ns.file, "r", encoding="utf-8") as fh:
                 payload = json.load(fh)
     except (OSError, ValueError) as e:
-        return _fail(f"batch 输入读取失败: {e}", 2)
+        return _fail(f"batch 输入读取失败: {e}", 2, error="bad_input")
     if isinstance(payload, dict):
         payload = payload.get("calls")
     if not isinstance(payload, list) or not payload:
-        return _fail("batch 输入应为 [{op, args}, ...]（或 {\"calls\": [...]}）", 2)
+        return _fail("batch 输入应为 [{op, args}, ...]（或 {\"calls\": [...]}）", 2,
+                     error="bad_input")
     results = execute_calls(payload, ns.continue_)
     _out({"count": len(results), "results": results})
     return 1 if any("error" in r for r in results) else 0
@@ -430,6 +449,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="engine-editor-cli",
         description="MyGameEngine 编辑器实时控制 CLI（需编辑器运行中; 默认 127.0.0.1:8977）",
+        epilog=("退出码: 0 = 成功；1 = op/连接失败；2 = 用法错误（未知 op / 参数解析失败）。"
+                '脚本请判退出码，不要 grep 输出；stdout 是 JSON（失败也有 {"ok": false, ...}），'
+                "stderr 只有人读提示，可以丢弃（2>$null）。"),
     )
     parser.add_argument("--version", action="version", version=f"engine-editor-cli {__version__}")
     parser.add_argument("--port", type=int, default=None,

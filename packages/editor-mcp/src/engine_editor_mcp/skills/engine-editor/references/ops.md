@@ -8,9 +8,13 @@
 
 ### `sim.play`
 
-启动 PIE（等同 Run 按钮）
+启动 PIE（等同 Run 按钮；启动前硬预检，force=true 跳过）
 
-- 示例: `engine-editor-cli call sim.play`
+预检只看“必然不生效”的状态（如未注册节点类型 → 图不会求值）。被拦时返回 {"error": "preflight_failed", "problems": [...]}，原因同时写入 sim.state 的 last_error。
+
+- `force` (bool, 可选) — true=跳过未知节点类型等预检硬拦（默认 false）
+
+- 示例: `engine-editor-cli call sim.play force=true`
 
 ### `sim.stop`
 
@@ -76,7 +80,7 @@
 - `ortho_size` (float, 可选)
 - `fov` (float, 可选)
 
-- 示例: `engine-editor-cli call camera.set role="2d" position={"k":1}`
+- 示例: `engine-editor-cli call camera.set role="2d" position=[x,y,z]`
 
 ## 界面面板
 
@@ -171,11 +175,12 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 
 ### `entity.list`
 
-列出实体（roots_only=true 仅根）
+列出实体（roots_only=true 仅根；with_transform=true 附带位姿）
 
 - `roots_only` (bool, 可选) — 默认 false
+- `with_transform` (bool, 可选) — true=每项附 transform{position,rotation_deg,scale}（省逐个 entity.get）
 
-- 示例: `engine-editor-cli call entity.list roots_only=true`
+- 示例: `engine-editor-cli call entity.list roots_only=true with_transform=true`
 
 ### `entity.get`
 
@@ -190,7 +195,7 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 
 新建实体（Transform only；有选中时成为其子级；自动选中新实体）
 
-返回: {entity_id, name, components, ...} — 后续 op 用 id=entity_id。
+返回: {entity_id, name, components, ...} — 后续 op 用 id=entity_id。批量建独立根实体时必须传 parent="none"（否则后建的会成为前一个的子级）。
 
 - `name` (str, 可选) — 实体名
 - `parent` (str, 可选) — 父实体 id/名称；"none"=强制根实体
@@ -222,6 +227,8 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 ### `entity.transform`
 
 设置 transform（编辑器坐标；rotation 角度；relative=相对调整）
+
+坐标约定: position/rotation 一律是**编辑器坐标** X 右 / Y 前 / Z 上，旋转单位=度。2D 场景只看 x / y（z 不参与投影也不控遮挡）。落盘的 .scene 用 GL 坐标（x, z, -y），是另一套表示 —— 不要拿.scene 里的字段顺序反推本 op 的数组顺序。
 
 - `id` (int, 可选) — 实体 id（id / name 二选一）
 - `name` (str, 可选) — 实体名（id / name 二选一；重名取首个）
@@ -350,11 +357,14 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 
 ### `scene.switch`
 
-切换场景（保存当前/加载/视口同步全流程）
+切换场景（内存态；不写盘 —— 改过磁盘文件请用 reload=true / scene.load）
 
-- `name` (str, 必填)
+**不会保存到磁盘**。switch 只把 ECS / 画布切到内存里的另一份场景；手改了 .scene 文件却直接 switch，看到的是内存里的旧数据。
 
-- 示例: `engine-editor-cli call scene.switch name=VALUE`
+- `name` (str, 必填) — 场景名（scene.list）
+- `reload` (bool, 可选) — true=从该场景的 .scene 文件重新读取（手改 JSON 后用）
+
+- 示例: `engine-editor-cli call scene.switch name=VALUE reload=true`
 
 ### `scene.create`
 
@@ -374,9 +384,9 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 
 ### `scene.load`
 
-加载 .scene 文件并设为活跃
+从磁盘加载 .scene 并设为活跃（只加载，不写盘）
 
-- `path` (str, 必填)
+- `path` (str, 必填) — .scene 文件路径（相对/绝对）
 
 - 示例: `engine-editor-cli call scene.load path=VALUE`
 
@@ -434,16 +444,18 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 - `description` (str, 可选) — 节点描述（agent/新手可读）
 - `position` (json, 可选) — [x,y] 画布位置
 
-- 示例: `engine-editor-cli call graph.add type=VALUE props={"k":1}`
+- 示例: `engine-editor-cli call graph.add type=VALUE props='<json>'`
 
 ### `graph.link`
 
-连接两个引脚（from/to 各 {node,pin}）
+连接两个引脚（from/to 各 {node,pin}；pin 是引脚名，不是 pin id）
+
+引脚名用 graph.list 的 nodes[].pins 查（如 Value / MICode / exec_in）。
 
 - `from` (json, 必填) — {"node":1,"pin":"exec"}
 - `to` (json, 必填) — {"node":2,"pin":"exec_in"}
 
-- 示例: `engine-editor-cli call graph.link from={"k":1} to={"k":1}`
+- 示例: `engine-editor-cli call graph.link from={"node":1,"pin":"exec"} to={"node":2,"pin":"exec_in"}`
 
 ### `graph.unlink`
 
@@ -453,7 +465,7 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 - `from` (json, 可选) — {"node":1,"pin":"exec"}（与 to 成对）
 - `to` (json, 可选) — {"node":2,"pin":"exec_in"}（与 from 成对）
 
-- 示例: `engine-editor-cli call graph.unlink link=0 from={"k":1}`
+- 示例: `engine-editor-cli call graph.unlink link=0 from={"node":1,"pin":"exec"}`
 
 ### `graph.remove_node`
 
@@ -462,16 +474,16 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 - `node` (int, 可选) — 节点 id
 - `nodes` (json, 可选) — [id, ...] 批量删除（不存在的 id 进 missing）
 
-- 示例: `engine-editor-cli call graph.remove_node node=0 nodes={"k":1}`
+- 示例: `engine-editor-cli call graph.remove_node node=0 nodes=[id, ...] 批量删除`
 
 ### `graph.set_props`
 
-更新节点属性
+更新节点属性（props 按 id 白名单改，不要用切片批量套）
 
 - `node` (int, 必填) — 节点 id
-- `props` (json, 必填)
+- `props` (json, 必填) — {"frequency": 10}
 
-- 示例: `engine-editor-cli call graph.set_props node=5 props={"k":1}`
+- 示例: `engine-editor-cli call graph.set_props node=5 props={"frequency": 10}`
 
 ### `graph.set_description`
 
@@ -492,7 +504,7 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 - `seed` (int, 可选) — 默认 0
 - `verbose` (bool, 可选) — 默认 true
 
-- 示例: `engine-editor-cli call graph.validate.start source="mesh" graph={"k":1}`
+- 示例: `engine-editor-cli call graph.validate.start source="mesh" graph='<json>'`
 
 ### `graph.validate.state`
 
@@ -537,7 +549,7 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 - `path` (str, 可选) — .json 文件
 - `validate_first` (bool, 可选) — 默认 true
 
-- 示例: `engine-editor-cli call graph.import graph={"k":1} path=VALUE`
+- 示例: `engine-editor-cli call graph.import graph='<json>' path=VALUE`
 
 ### `graph.fit`
 
@@ -552,7 +564,7 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 - `nodes` (json, 必填) — [2,3] 或节点 alias 列表
 - `alias` (str, 可选) — 组别名；省略自动 group_N
 
-- 示例: `engine-editor-cli call graph.group.merge nodes={"k":1} alias=VALUE`
+- 示例: `engine-editor-cli call graph.group.merge nodes=[2,3] 或节点 alias 列表 alias=VALUE`
 
 ### `graph.group.ungroup`
 
@@ -650,7 +662,16 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 - `key` (str, 必填) — 如 ui.font_scale / ui.language
 - `value` (json, 必填) — 新值（数值 / 字符串）
 
-- 示例: `engine-editor-cli call settings.set key=VALUE value={"k":1}`
+- 示例: `engine-editor-cli call settings.set key=VALUE value='<json>'`
+
+### `debug.events`
+
+读写 Debug ▸ Terminal 事件上报配置（enabled / events）
+
+- `enabled` (bool, 可选) — 总开关
+- `events` (json, 可选) — [key, ...] 或 "a,b"；未知 key 丢弃
+
+- 示例: `engine-editor-cli call debug.events enabled=true events=[key, ...] 或 "a,b"；未知 key 丢弃`
 
 ## 线程诊断
 

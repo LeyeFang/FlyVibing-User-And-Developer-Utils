@@ -54,6 +54,8 @@ ASSETS = (
     "install.sh",
     "install.py",
     "README-INSTALL.md",
+    "engine-cli.cmd",
+    "engine-cli.sh",
 )
 ROOT_DOCS = ("CHANGELOG.md", "LICENSE", "VERSION")
 

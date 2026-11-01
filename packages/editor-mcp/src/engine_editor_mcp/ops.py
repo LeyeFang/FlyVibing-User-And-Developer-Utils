@@ -1,7 +1,7 @@
 """Op registry — 编辑器 Live op 的单一事实源（CLI / 精简 MCP / 文档生成共用）。
 
 数据来源与责任:
-  - 引擎侧实现: Application/Editor/Services/LiveCommandServer.py `_register_ops()`（74 ops）;
+  - 引擎侧实现: Application/Editor/Services/LiveCommandServer.py `_register_ops()`（75 ops）;
   - 本注册表是 agent 侧（CLI/MCP/Skill）的唯一元数据来源;
   - 新增 op 时: 引擎侧注册实现 → 本表加条目 → `python -m engine_editor_mcp.docgen` 重生成 ops.md;
   - 完整性由 Test/Application/Editor/test_editor_mcp_package.py 对照引擎源码守卫。
@@ -37,6 +37,9 @@ class OpSpec:
     params: tuple[Param, ...] = ()
     internal: bool = False  # true → 不出现在 ops 列表/Skill 文档（frame.* 由 capture 封装）
     detail: str = ""
+    # 可复制粘贴的真实调用示例（不带 `engine-editor-cli call` 前缀也行）。
+    # 不填时由 example_args() 从 params 推一个“能看懂但不一定能跑”的占位示例。
+    example: str = ""
 
 
 CATEGORY_ORDER = [
@@ -64,7 +67,11 @@ _E = (Param("id", "int", False, "实体 id（id / name 二选一）"),
 
 OPS: dict[str, OpSpec] = {o.name: o for o in [
     # ── sim ──
-    OpSpec("sim.play", "sim", "启动 PIE（等同 Run 按钮）"),
+    OpSpec("sim.play", "sim", "启动 PIE（等同 Run 按钮；启动前硬预检，force=true 跳过）",
+           (Param("force", "bool", False, "true=跳过未知节点类型等预检硬拦（默认 false）"),),
+           detail="预检只看“必然不生效”的状态（如未注册节点类型 → 图不会求值）。"
+                  "被拦时返回 {\"error\": \"preflight_failed\", \"problems\": [...]}，"
+                  "原因同时写入 sim.state 的 last_error。"),
     OpSpec("sim.stop", "sim", "停止 PIE（等同 Stop 按钮）"),
     OpSpec("sim.state", "sim", "查询模拟状态（state / runtime_alive）"),
     # ── device ──
@@ -128,13 +135,17 @@ OPS: dict[str, OpSpec] = {o.name: o for o in [
             Param("ortho_size", "float", False, ""),
             Param("fov", "float", False, ""))),
     # ── entity ──
-    OpSpec("entity.list", "entity", "列出实体（roots_only=true 仅根）",
-           (Param("roots_only", "bool", False, "默认 false"),)),
+    OpSpec("entity.list", "entity", "列出实体（roots_only=true 仅根；with_transform=true 附带位姿）",
+           (Param("roots_only", "bool", False, "默认 false"),
+            Param("with_transform", "bool", False, "true=每项附 transform{position,rotation_deg,scale}（省逐个 entity.get）")),
+           example="roots_only=true with_transform=true"),
     OpSpec("entity.get", "entity", "读取实体快照（组件/层级/可见性/transform）", _E),
     OpSpec("entity.add", "entity", "新建实体（Transform only；有选中时成为其子级；自动选中新实体）",
            (Param("name", "str", False, "实体名"),
             Param("parent", "str", False, '父实体 id/名称；"none"=强制根实体')),
-           detail="返回: {entity_id, name, components, ...} — 后续 op 用 id=entity_id。"),
+           detail=("返回: {entity_id, name, components, ...} — 后续 op 用 id=entity_id。"
+                   "批量建独立根实体时必须传 parent=\"none\"（否则后建的会成为前一个的子级）。"),
+           example='name=JudgeGreen parent="none"'),
     OpSpec("entity.rename", "entity", "重命名实体（不强制唯一）", _E + (Param("new_name", "str", True, ""),)),
     OpSpec("entity.delete", "entity", "删除实体（scope: one/tree/list；默认 tree）",
            _E + (Param("ids", "json", False, "实体 id/名称列表（可选）"),
@@ -145,7 +156,12 @@ OPS: dict[str, OpSpec] = {o.name: o for o in [
                  Param("rotation", "json", False, "[x,y,z] 角度"),
                  Param("scale", "json", False, "标量或 [x,y,z]"),
                  Param("local", "bool", False, "本地坐标"),
-                 Param("relative", "bool", False, "位移加/旋转加/缩放乘（gizmo 语义）"))),
+                 Param("relative", "bool", False, "位移加/旋转加/缩放乘（gizmo 语义）")),
+           detail=("坐标约定: position/rotation 一律是**编辑器坐标** X 右 / Y 前 / Z 上，"
+                   "旋转单位=度。2D 场景只看 x / y（z 不参与投影也不控遮挡）。"
+                   "落盘的 .scene 用 GL 坐标（x, z, -y），是另一套表示 —— 不要拿"
+                   ".scene 里的字段顺序反推本 op 的数组顺序。"),
+           example='name=JudgeGreen position=[0,6,0]'),
     OpSpec("entity.visible", "entity", "设置可见性（editor=眼图标; render=MeshRenderer；scope one/tree/list）",
            _E + (Param("ids", "json", False, "实体 id/名称列表（可选）"),
                  Param("scope", "enum", False, "one / tree / list；editor 默认 tree，render 默认 one"),
@@ -174,12 +190,18 @@ OPS: dict[str, OpSpec] = {o.name: o for o in [
                  Param("relative", "bool", False, ""))),
     # ── scene ──
     OpSpec("scene.list", "scene", "场景列表 + 活跃场景"),
-    OpSpec("scene.switch", "scene", "切换场景（保存当前/加载/视口同步全流程）",
-           (Param("name", "str", True, ""),)),
+    OpSpec("scene.switch", "scene", "切换场景（内存态；不写盘 —— 改过磁盘文件请用 reload=true / scene.load）",
+           (Param("name", "str", True, "场景名（scene.list）"),
+            Param("reload", "bool", False, "true=从该场景的 .scene 文件重新读取（手改 JSON 后用）")),
+           detail="**不会保存到磁盘**。switch 只把 ECS / 画布切到内存里的另一份场景；"
+                  "手改了 .scene 文件却直接 switch，看到的是内存里的旧数据。",
+           example="name=MI-SSSEP"),
     OpSpec("scene.create", "scene", "新建场景并切换为活跃（含视口/节点图同步）", (Param("name", "str", True, ""),)),
     OpSpec("scene.save", "scene", "保存当前场景（省略 path 用最近路径）",
            (Param("path", "str", False, ""),)),
-    OpSpec("scene.load", "scene", "加载 .scene 文件并设为活跃", (Param("path", "str", True, ""),)),
+    OpSpec("scene.load", "scene", "从磁盘加载 .scene 并设为活跃（只加载，不写盘）",
+           (Param("path", "str", True, ".scene 文件路径（相对/绝对）"),),
+           example="path=scenes/MI-SSSEP.scene"),
     # ── resource ──
     OpSpec("resource.list", "resource", "资源列表",
            (Param("kind", "enum", True, "mesh / shader / texture / material / prefab"),)),
@@ -197,16 +219,24 @@ OPS: dict[str, OpSpec] = {o.name: o for o in [
             Param("props", "json", False, "节点属性 dict"),
             Param("description", "str", False, "节点描述（agent/新手可读）"),
             Param("position", "json", False, "[x,y] 画布位置"))),
-    OpSpec("graph.link", "graph", "连接两个引脚（from/to 各 {node,pin}）",
+    OpSpec("graph.link", "graph", "连接两个引脚（from/to 各 {node,pin}；pin 是引脚名，不是 pin id）",
            (Param("from", "json", True, '{"node":1,"pin":"exec"}'),
-            Param("to", "json", True, '{"node":2,"pin":"exec_in"}'))),    OpSpec("graph.unlink", "graph", "删除连线（link=<id> 或 from/to 引脚）",
+            Param("to", "json", True, '{"node":2,"pin":"exec_in"}')),
+           detail="引脚名用 graph.list 的 nodes[].pins 查（如 Value / MICode / exec_in）。",
+           example='from={"node":402,"pin":"Value"} to={"node":10800,"pin":"MICode"}'),
+    OpSpec("graph.unlink", "graph", "删除连线（link=<id> 或 from/to 引脚）",
            (Param("link", "int", False, "连线 id（graph.list 的 links[].id）"),
            Param("from", "json", False, '{"node":1,"pin":"exec"}（与 to 成对）'),
-           Param("to", "json", False, '{"node":2,"pin":"exec_in"}（与 from 成对）'))),
+           Param("to", "json", False, '{"node":2,"pin":"exec_in"}（与 from 成对）')),
+           example="link=500"),
     OpSpec("graph.remove_node", "graph", "删除节点及其所有连线（等同画布 Delete）",
            (Param("node", "int", False, "节点 id"),
-           Param("nodes", "json", False, "[id, ...] 批量删除（不存在的 id 进 missing）"))),    OpSpec("graph.set_props", "graph", "更新节点属性",
-           (Param("node", "int", True, "节点 id"), Param("props", "json", True, ""))),
+           Param("nodes", "json", False, "[id, ...] 批量删除（不存在的 id 进 missing）")),
+           example="nodes=[10800,10801]"),
+    OpSpec("graph.set_props", "graph", "更新节点属性（props 按 id 白名单改，不要用切片批量套）",
+           (Param("node", "int", True, "节点 id"),
+            Param("props", "json", True, '{"frequency": 10}')),
+           example='node=10800 props={"frequency": 10}'),
     OpSpec("graph.set_description", "graph", "读写节点描述（省略 description=读取；空串=清除）",
            (Param("node", "int", True, "节点 id"),
             Param("description", "str", False, "节点描述"))),
@@ -271,6 +301,10 @@ OPS: dict[str, OpSpec] = {o.name: o for o in [
     OpSpec("settings.set", "settings", "写入编辑器设置（校验+钳制 → 持久化 → 下一渲染帧生效）",
            (Param("key", "str", True, "如 ui.font_scale / ui.language"),
             Param("value", "json", True, "新值（数值 / 字符串）"))),
+    OpSpec("debug.events", "settings", "读写 Debug ▸ Terminal 事件上报配置（enabled / events）",
+           (Param("enabled", "bool", False, "总开关"),
+           Param("events", "json", False, '[key, ...] 或 "a,b"；未知 key 丢弃')),
+           example="events=[\"input.key\",\"scene.new\"]"),
     # ── frame（内部；agent 侧请用 capture / engine_capture）──
     OpSpec("frame.request", "frame", "请求抓下一渲染帧（内部）",
            (Param("target", "enum", True, "editor / pie"),), internal=True),
@@ -391,7 +425,11 @@ def op_names(include_internal: bool = False) -> list[str]:
 
 
 def example_args(spec: OpSpec) -> str:
-    """给帮助文本生成一行 CLI 示例（挑前 2 个参数）。"""
+    """给帮助文本生成一行 CLI 示例（挑前 2 个参数）。
+
+    json 参数优先用 `Param.summary` 里写好的字面量（如 `{"node":1,"pin":"exec"}`），
+    这样能直接复制粘贴；没有字面量时退回中性占位（并标注需替换），不伪造可直接信的值。
+    """
     parts: list[str] = []
     for p in spec.params[:2]:
         if p.kind in ("int", "float"):
@@ -399,7 +437,9 @@ def example_args(spec: OpSpec) -> str:
         elif p.kind == "bool":
             val = "true"
         elif p.kind == "json":
-            val = '{"k":1}'
+            hint = (p.summary or "").strip()
+            literal = hint.split("（")[0].split(" (")[0].strip()
+            val = literal if literal[:1] in ("{", "[") else "'<json>'"
         elif p.kind == "enum":
             val = '"2d"' if "3d" in p.summary else '"mesh"'
         else:
@@ -422,11 +462,24 @@ def format_ops_list() -> str:
     return "\n".join(lines)
 
 
+def suggest_ops(name: str, limit: int = 8) -> list[str]:
+    """未知 op 的相近候选（同前缀优先，不命中时按前 3 字符包含关系兜底）。"""
+    key = (name or "").strip().lower()
+    if not key:
+        return []
+    prefix = key.split(".")[0]
+    near = [n for n in op_names() if n.split(".")[0] == prefix]
+    if not near:
+        head = key[:3]
+        near = [n for n in op_names() if head and head in n]
+    return near[:limit]
+
+
 def format_op_help(op_or_alias: str) -> str:
     """单 op 详情（engine_help(topic) / CLI `help <op>`）。未知名 → 建议。"""
     name, defaults = resolve(op_or_alias)
     if not name:
-        near = [n for n in op_names() if op_or_alias and op_or_alias.split(".")[0] in n][:8]
+        near = suggest_ops(op_or_alias)
         hint = ("相近: " + ", ".join(near)) if near else "用 `ops` 看全部目录"
         return f"unknown op: {op_or_alias!r} — {hint}"
     spec = OPS[name]
@@ -442,7 +495,7 @@ def format_op_help(op_or_alias: str) -> str:
             lines.append(f"  {t} ({flag}){extra}")
     else:
         lines.append("参数: 无")
-    call = example_args(spec)
+    call = spec.example or example_args(spec)
     if defaults:
         lines.append(f"alias: {op_or_alias} → {name}（默认 args={json.dumps(defaults, ensure_ascii=False)}）")
     lines.append(f"示例: engine-editor-cli call {name}" + (f" {call}" if call else ""))
