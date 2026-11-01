@@ -3,6 +3,16 @@
 All notable toolchain changes are recorded here. Package versions may move
 independently; the toolchain release version is stored in `VERSION`.
 
+## Unreleased
+
+- Added `graph.remove_node` / `graph.unlink` / `console.tail` to the op registry
+  (74 core ops); `references/ops.md` regenerated.
+- `extdev/node_development.md` gained §8 “common graph/entity/time pitfalls”: iterative
+  graph editing with the new remove ops, `TimeTrigger` edge semantics, per-frame rendering
+  state, `entity.add` parenting, editor-vs-GL coordinates, and `console.tail` debugging.
+- `rules.md` / `graph_flow.py`: `TimeDelay` removed, `TimeTrigger` documented as
+  edge-triggered.
+
 ## 0.6.0 (2026-10-31)
 
 Toolchain release aligned with FlyVibingEngine 1.0.2.

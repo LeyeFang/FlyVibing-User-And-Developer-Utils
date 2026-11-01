@@ -221,7 +221,8 @@ python -m flyvibing_node_editor.cli group-delete --scene scene.scene --group g1 
 - **OnKeyPressed / OnKeyReleased / OnMouseClicked**: fire once per matching input event. `OnMouseClicked` fires on release only when the press moved <= 6 px (drag is not a click). Props: key (`"Space"`/`"A"`/`"Escape"`/code), mods (`any`/`none`/`Shift`/`Ctrl+Shift`), button (`Left`/`Right`/`Middle`/`Any`), repeat (OnKeyPressed only).
 - **Exec chain**: depth-first traversal following exec output→input links.
 - **Pure data nodes** (Constant, Compare, ScalarMath, Random, IsKeyDown, IsMouseButtonDown, GetMousePosition, etc.): NO exec pins. Evaluated LAZILY when their output pin is read via a data link.
-- **TimeTrigger**: fires when timer ≥ threshold. Re-arms only when threshold increases.
+- **TimeTrigger**: fires on the rising edge of `current >= threshold` (once per crossing).
+  Re-arm by raising the threshold above current (variable/pin pulse pattern) or by resetting the timer.
   (The engine removed `TimeDelay` — it only advanced when the whole exec chain re-entered
   every frame, and its duration prop was ignored. Use `TimeTrigger(mode=manual, time=N)`
   on an `OnFrameUpdate` chain instead.)

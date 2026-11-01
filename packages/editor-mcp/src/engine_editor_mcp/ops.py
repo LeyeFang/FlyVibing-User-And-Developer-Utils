@@ -1,7 +1,7 @@
 """Op registry — 编辑器 Live op 的单一事实源（CLI / 精简 MCP / 文档生成共用）。
 
 数据来源与责任:
-  - 引擎侧实现: Application/Editor/Services/LiveCommandServer.py `_register_ops()`（71 ops）;
+  - 引擎侧实现: Application/Editor/Services/LiveCommandServer.py `_register_ops()`（74 ops）;
   - 本注册表是 agent 侧（CLI/MCP/Skill）的唯一元数据来源;
   - 新增 op 时: 引擎侧注册实现 → 本表加条目 → `python -m engine_editor_mcp.docgen` 重生成 ops.md;
   - 完整性由 Test/Application/Editor/test_editor_mcp_package.py 对照引擎源码守卫。
@@ -199,8 +199,13 @@ OPS: dict[str, OpSpec] = {o.name: o for o in [
             Param("position", "json", False, "[x,y] 画布位置"))),
     OpSpec("graph.link", "graph", "连接两个引脚（from/to 各 {node,pin}）",
            (Param("from", "json", True, '{"node":1,"pin":"exec"}'),
-            Param("to", "json", True, '{"node":2,"pin":"exec_in"}'))),
-    OpSpec("graph.set_props", "graph", "更新节点属性",
+            Param("to", "json", True, '{"node":2,"pin":"exec_in"}'))),    OpSpec("graph.unlink", "graph", "删除连线（link=<id> 或 from/to 引脚）",
+           (Param("link", "int", False, "连线 id（graph.list 的 links[].id）"),
+           Param("from", "json", False, '{"node":1,"pin":"exec"}（与 to 成对）'),
+           Param("to", "json", False, '{"node":2,"pin":"exec_in"}（与 from 成对）'))),
+    OpSpec("graph.remove_node", "graph", "删除节点及其所有连线（等同画布 Delete）",
+           (Param("node", "int", False, "节点 id"),
+           Param("nodes", "json", False, "[id, ...] 批量删除（不存在的 id 进 missing）"))),    OpSpec("graph.set_props", "graph", "更新节点属性",
            (Param("node", "int", True, "节点 id"), Param("props", "json", True, ""))),
     OpSpec("graph.set_description", "graph", "读写节点描述（省略 description=读取；空串=清除）",
            (Param("node", "int", True, "节点 id"),
@@ -226,6 +231,10 @@ OPS: dict[str, OpSpec] = {o.name: o for o in [
             Param("path", "str", False, ".json 文件"),
             Param("validate_first", "bool", False, "默认 true"))),
     OpSpec("graph.fit", "graph", "视图适配全部节点（等同节点编辑器工具栏 Fit；截图前常用）"),
+    OpSpec("console.tail", "editor", "读引擎控制台日志（stdout/stderr tee；since/lines/level）",
+           (Param("since", "int", False, "只返回 seq > since（轮询用）"),
+           Param("lines", "int", False, "最多返回多少行（默认 200，上限 4000）"),
+           Param("level", "str", False, "按级别过滤：info / warn / error"))),
     OpSpec("graph.group.merge", "graph",
            "把选中节点合并为组（等同画布右键 Merge into Group；不改节点位置）",
            (Param("nodes", "json", True, "[2,3] 或节点 alias 列表"),

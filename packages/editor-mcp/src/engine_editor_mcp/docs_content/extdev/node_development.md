@@ -192,3 +192,61 @@ python FlyVibing-User-And-Developer-Utils/packages/extension-kit/review_extensio
 参考：`packages/node-editor/README.md`（组模板、alias、`set_group`）、
 `Application/Functions/SerialParallelDevice/node_pack.py`（完整官方 pack）、
 `Application/Functions/VirtualDevice/node_pack.py`（设备族 pack）。
+
+## 8. 图 / 实体 / 时间的常见坑（2026-11-01）
+
+这一节都是集成实测踩出来的；先读一遍能省掉半天。
+
+### 8.1 迭代改图：可以删了
+
+`graph.remove_node`（`node=<id>` 或 `nodes=[...]`，级联删连线）与
+`graph.unlink`（`link=<id>` 或 `from`/`to` 引脚对）已提供。改错了就地删，
+**不再需要** `graph.export` → 手改 JSON → `graph.import`。删之前先用
+`graph.list` 拿 `links[].id`。
+
+### 8.2 `TimeTrigger` 是**上升沿**触发
+
+`TimeTrigger` 只在 `current >= threshold` 从「不满足」变成「满足」的那一帧触发一次，
+不是电平、也不是按阈值大小反复触发。
+
+- 固定阈值 + 命名 Timer 每周期重置 → 每周期触发一次；
+- 需要「脉冲序列」→ 触发后把 `next_time` 抬高（`mode=pin` 接变量），
+  或用 `SetTimer` 重置计时；
+- `mode=pin` 且阈值**每帧连续增长**时也只触发一次（旧版会每帧触发）。
+
+### 8.3 渲染状态由「每帧链」驱动
+
+`EntitySetRenderVisible` / transform 这类渲染状态只写一次就被别的链覆盖，
+通常是因为**图里本来就有另一条每帧链**在驱动它。需要持续状态时，用
+`OnFrameUpdate → TimeGetElapsed/Compare → EntitySetRenderVisible` 每帧断言；
+一次性的 `OnGameStart` 链只适合初始化。
+
+### 8.4 `entity.add` 默认会挂到「当前选中」
+
+`entity.add` 与面板 `+New` 同语义：有选中实体时，新实体会成为它的子级，并自动选中新实体
+→ 连续 add 会形成父子链。批量建实体时显式传 `parent: "none"`（或目标父级 id），
+建完检查 `parent_id`。
+
+### 8.5 坐标：op 用编辑器坐标，`.scene` 文件用 GL 坐标
+
+| 坐标系 | 轴 |
+|---|---|
+| 编辑器（`entity.transform` 等 op、Inspector） | +X 右 / +Y 前 / +Z 上 |
+| 引擎内部与 `.scene` 存储（`position_*` / `local_pos_*`） | +X 右 / +Y 上 / +Z 后 |
+
+转换：`editor → GL: (x, y, z) → (x, z, -y)`。所以 `position=[0,0,6]` 落盘是
+`(0, 6, -0)` —— 这是设计，不是轴错位。要直接改 `.scene` JSON 时按 GL 系写；
+改完再打开核对一次 `entity.get`（它返回编辑器坐标）。
+
+### 8.6 设备/外部系统失败：读控制台
+
+节点里的 `print` / `ctx.emit_log` 现在会进 `LogBus` 环形缓冲：
+
+```text
+engine-editor-cli call console.tail since=0 lines=200
+engine-editor-cli call console.tail level=error
+```
+
+轮询时把上次的 `next_since` 传回 `since`，只取新增行。排查
+`InitDevice` 这类「失败原因只在控制台」的问题时先用它，而不是猜参数。
+

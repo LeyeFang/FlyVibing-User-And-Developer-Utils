@@ -1,4 +1,4 @@
-# UI 设计开发协议（Application/Editor/UI）
+﻿# UI 设计开发协议（Application/Editor/UI）
 
 > 适用：编辑器面板、节点卡控件（Widget）、样式、Add 菜单、文件对话框、UI 交互测试。
 > 业务逻辑（求值/设备/约束规则）不属于本文档 → 见 `node_editor_protocol.md` / `device_io_protocol.md`。
@@ -253,6 +253,8 @@
 | `graph.types` | Add 菜单目录 / 扩展节点包（只读发现） | — | D |
 | `graph.add` | Add 菜单 | 画布出现节点（不要求连线） | D |
 | `graph.link` | 引脚拖拽连线 | 画布连线、下游控件引用下拉更新 | D |
+| `graph.unlink` | 选中连线 Delete | 连线消失 | D |
+| `graph.remove_node` | 选中节点 Delete | 节点与其连线消失（批量 `nodes=[...]`） | D |
 | `graph.set_props` | 节点卡控件 | 卡片字段回显（引用型 props 联动见 §7） | D |
 | `graph.set_description` | 节点卡 Description 展开区 | 描述文本回显（空串=清除） | D |
 | `graph.validate.start` | 工具条 Validate | 校验任务状态（报告窗口） | D |
@@ -275,6 +277,7 @@
 | `settings.get` | Settings 面板 ▸ Common（选项本体） | 无（只读） | D |
 | `settings.set` | Settings 面板 ▸ Common / Export；Edit ▸ Preferences… | 控件值即时反映新值；字体缩放/语言在下一渲染帧生效（含面板标题） | D + Q |
 | `device.save` | —（agent / 节点 `SaveDeviceData` 同实现） | 返回 paths / meta_path / samples / duration_s / written / scope；不改变录制状态 | — |
+| `console.tail` | —（agent 诊断；stdout/stderr tee 环形缓冲） | 返回 seq/level/text 行（since 增量轮询） | — |
 | `frame.request` / `frame.fetch` | —（内部；`engine_capture` 封装） | — | — |
 | `editor.quit` | 窗口关闭按钮 | 全链清理退出（PIE 先行停止） | — |
 

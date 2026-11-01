@@ -24,6 +24,21 @@
 
 - 示例: `engine-editor-cli call sim.state`
 
+## 设备会话
+
+### `device.save`
+
+不停采保存设备录制（session/buffer；返回 paths/samples/written）
+
+- `device` (str, 可选) — 会话名（省略 = 自动绑定唯一会话）
+- `save_scope` (enum, 可选) — "session"（默认）/ "buffer"
+- `elapsed_s` (float, 可选) — 保存前 pump 到的仿真时间（可选）
+- `tag` (str, 可选) — 文件名标签（可选）
+- `pool` (str, 可选) — 池作用域（可选）
+- `pump` (bool, 可选) — 保存前补齐数据（默认 true）
+
+- 示例: `engine-editor-cli call device.save device=VALUE save_scope="mesh"`
+
 ## 视图 / 摄像机
 
 ### `view.set_mode`
@@ -430,6 +445,25 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 
 - 示例: `engine-editor-cli call graph.link from={"k":1} to={"k":1}`
 
+### `graph.unlink`
+
+删除连线（link=<id> 或 from/to 引脚）
+
+- `link` (int, 可选) — 连线 id（graph.list 的 links[].id）
+- `from` (json, 可选) — {"node":1,"pin":"exec"}（与 to 成对）
+- `to` (json, 可选) — {"node":2,"pin":"exec_in"}（与 from 成对）
+
+- 示例: `engine-editor-cli call graph.unlink link=0 from={"k":1}`
+
+### `graph.remove_node`
+
+删除节点及其所有连线（等同画布 Delete）
+
+- `node` (int, 可选) — 节点 id
+- `nodes` (json, 可选) — [id, ...] 批量删除（不存在的 id 进 missing）
+
+- 示例: `engine-editor-cli call graph.remove_node node=0 nodes={"k":1}`
+
 ### `graph.set_props`
 
 更新节点属性
@@ -627,6 +661,16 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 - 示例: `engine-editor-cli call threads.snapshot`
 
 ## 编辑器
+
+### `console.tail`
+
+读引擎控制台日志（stdout/stderr tee；since/lines/level）
+
+- `since` (int, 可选) — 只返回 seq > since（轮询用）
+- `lines` (int, 可选) — 最多返回多少行（默认 200，上限 4000）
+- `level` (str, 可选) — 按级别过滤：info / warn / error
+
+- 示例: `engine-editor-cli call console.tail since=0 lines=0`
 
 ### `editor.quit`
 
