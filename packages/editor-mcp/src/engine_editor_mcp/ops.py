@@ -57,6 +57,7 @@ CATEGORY_ORDER = [
     ("project", "工程"),
     ("extension", "扩展体系"),
     ("settings", "设置"),
+    ("hotkeys", "输入热键"),
     ("frame", "抓帧（内部）"),
     ("threads", "线程诊断"),
     ("editor", "编辑器"),
@@ -67,11 +68,14 @@ _E = (Param("id", "int", False, "实体 id（id / name 二选一）"),
 
 OPS: dict[str, OpSpec] = {o.name: o for o in [
     # ── sim ──
-    OpSpec("sim.play", "sim", "启动 PIE（等同 Run 按钮；启动前硬预检，force=true 跳过）",
-           (Param("force", "bool", False, "true=跳过未知节点类型等预检硬拦（默认 false）"),),
+    OpSpec("sim.play", "sim", "启动 PIE（等同 Run 按钮；启动前硬预检，force 跳过 / auto_fix 自动修）",
+           (Param("force", "bool", False, "true=跳过未知节点类型等预检硬拦（默认 false）"),
+            Param("auto_fix", "bool", False, "true=先启用缺失扩展并就地补全画布节点，再启动")),
            detail="预检只看“必然不生效”的状态（如未注册节点类型 → 图不会求值）。"
                   "被拦时返回 {\"error\": \"preflight_failed\", \"problems\": [...]}，"
-                  "原因同时写入 sim.state 的 last_error。"),
+                  "每条带 fix（可复制命令）与 owners（缺哪个扩展）；"
+                  "原因同时写入 sim.state 的 last_error，force 运行时 sim.state "
+                  "会一直带 forced_unknown_types。"),
     OpSpec("sim.stop", "sim", "停止 PIE（等同 Stop 按钮）"),
     OpSpec("sim.state", "sim", "查询模拟状态（state / runtime_alive）"),
     # ── device ──
@@ -305,6 +309,12 @@ OPS: dict[str, OpSpec] = {o.name: o for o in [
            (Param("enabled", "bool", False, "总开关"),
            Param("events", "json", False, '[key, ...] 或 "a,b"；未知 key 丢弃')),
            example="events=[\"input.key\",\"scene.new\"]"),
+    # ── hotkeys（输入热键注册表; 与 Help ▸ Hot Keys 面板同源） ──
+    OpSpec("hotkeys.list", "hotkeys",
+           "热键总表（Help ▸ Hot Keys 面板同源注册表；key/mouse + scope + 说明）",
+           (Param("scope", "enum", False,
+                  "editor / viewport / node_editor / pie（省略 = 全部）"),),
+           example="scope=viewport"),
     # ── frame（内部；agent 侧请用 capture / engine_capture）──
     OpSpec("frame.request", "frame", "请求抓下一渲染帧（内部）",
            (Param("target", "enum", True, "editor / pie"),), internal=True),
@@ -359,6 +369,23 @@ ALIASES: dict[str, tuple[str, dict[str, Any]]] = {
     "editor_quit": ("editor.quit", {}),
 }
 
+# 非 op 通道（CLI 子命令）— 只在 `ops` 目录尾部展示，不在命令总线注册表里。
+# 元组 (子命令, 一行说明)；改 CLI 子命令时同步这里（守卫会对照 argparse 校验）。
+CLI_COMMANDS: tuple[tuple[str, str], ...] = (
+    ("ops", "op 目录（本页）"),
+    ("help <op|主题>", "单 op 详情 / 主题帮助（cli / probe / capture / mcp / skill）"),
+    ("call <op> k=v ...", "执行一个 op"),
+    ("batch <file|->", "顺序执行多个 op（出错默认中断，--continue 继续）"),
+    ("exec <script|->", "脚本模式（注入 engine 客户端）"),
+    ("validate", "图干跑校验（阻塞编排；--detail full 看全量报告）"),
+    ("capture [editor|pie]", "抓帧落盘，只回路径（省 token）"),
+    ("probe [editor|pie] --points x:y;...", "像素采样→RGBA（顶左坐标；与 capture 同一帧）"),
+    ("launch", "启动引擎并等待握手（--port auto 多实例）"),
+    ("engines", "扫描端口频段，列出可响应的引擎"),
+    ("doc", "内置文档（索引→章节→按节读取）"),
+    ("setup", "向工作区安装 skill + mcp.json"),
+)
+
 # engine_help / CLI `help <topic>` 的主题索引（完整文本按需返回 — 渐进披露）
 TOPIC_HELP = {
     "mcp": (
@@ -376,16 +403,18 @@ TOPIC_HELP = {
         "  engine-editor-cli launch [--port auto] [--language en|zh] [--set k=v]  # 启动引擎 + 握手\n"
         "  engine-editor-cli engines                    # 扫描 8977..9076，列出运行中的编辑器\n"
         "  engine-editor-cli --port 8977 call ...       # 指定实例（全局 --port 放子命令前）\n"
-        "  engine-editor-cli ops                        # op 目录\n"
-        "  engine-editor-cli help <op>                  # 单 op 详情\n"
+        "  engine-editor-cli ops                        # op 目录（尾部也列非 op 子命令）\n"
+        "  engine-editor-cli help <op|主题>             # 单 op 详情 / 主题（probe、exitcodes …）\n"
         "  engine-editor-cli call <op> k=v ... [--json '{...}']\n"
         "  engine-editor-cli batch ops.json             # 顺序批处理（- = stdin）\n"
         "  engine-editor-cli exec script.py             # 脚本模式（全局 engine 客户端）\n"
         "  engine-editor-cli validate [--detail full]   # 图干跑校验（阻塞编排）\n"
         "  engine-editor-cli capture pie --out f.png    # 抓帧落盘（只回路径）\n"
+        "  engine-editor-cli probe pie --points 400:300 # 像素采样 → RGBA（顶左坐标；help probe）\n"
         "  engine-editor-cli setup [--workspace DIR] [--port N]  # 安装 skill + mcp.json\n"
         "值解析: 先尝试 JSON（数字/bool/数组/对象/引号字符串），失败按纯字符串。\n"
         "多引擎: 每个 agent 先 launch --port auto，后续统一用返回的 --port N。\n"
+        "退出码/输出契约: `help exitcodes`（stdout 恒 JSON；stderr 可丢）。\n"
         "脚本模式: engine.ok('sim.play'); engine.try_send(...); engine.capture('pie'); engine.batch([...])"
     ),
     "skill": (
@@ -401,6 +430,29 @@ TOPIC_HELP = {
         "  CLI capture [editor|pie]   — 只落盘并回路径（省 token; 图片由用户/工具查看）\n"
         "  目录: <临时目录>/engine_editor_mcp/frames（MGE_MCP_FRAMES_DIR 覆盖; server 启动清空）\n"
         "  pie 需 PIE 运行中; editor 随时可抓。"
+    ),
+    "probe": (
+        "像素采样（不需要图像通道的断言手段）:\n"
+        "  engine-editor-cli probe pie --points 400:300;800:450\n"
+        "  engine-editor-cli probe pie --points 100:100 --timeout 10   # 慢帧/首次抓帧加大超时\n"
+        "语义:\n"
+        "  - 坐标是**顶左**系（与 capture 落盘的 PNG 同向），越界点返回 rgba=null + error\n"
+        "  - 与 capture **共用同一条抓帧流程**（client.fetch_raw_frame）: 同一 framebuffer、同一缩放\n"
+        "  - 返回 {frame: {target,width,height}, pixels: [{x,y,rgba}]}\n"
+        "范围:\n"
+        "  - probe pie: PIE 运行中才有帧；验证场景内容/颜色用它\n"
+        "  - probe editor: 采编辑器视口的 framebuffer；采样点必须落在视口内（尺寸看 renderer.snapshot\n"
+        "    的 viewport），窗口最小化/被遮挡时可能全透明 —— 整片 [0,0,0,0] 先排这两项\n"
+        "配 renderer.snapshot 一起用: 先拿 viewport/尺寸，再按坐标采样。"
+    ),
+    "exitcodes": (
+        "CLI 退出码与输出契约（写脚本时看这段）:\n"
+        "  0 = 成功\n"
+        "  1 = op 失败或连接失败（stdout 的 JSON 里有 \"error\" 键）\n"
+        "  2 = 用法错误（未知 op / 参数解析失败 / batch 输入非法）\n"
+        "stdout 永远是 JSON（失败也有 {\"ok\": false, \"error\": ..., \"detail\": ...}，未知 op 还带 suggest）;\n"
+        "stderr 只有人读提示，可以整段丢弃（2>$null 不会吞掉真错误）。\n"
+        "所以: 判退出码 + 读 stdout，不要 grep 输出、不要靠空输出猜成功。"
     ),
 }
 
@@ -427,9 +479,11 @@ def op_names(include_internal: bool = False) -> list[str]:
 def example_args(spec: OpSpec) -> str:
     """给帮助文本生成一行 CLI 示例（挑前 2 个参数）。
 
-    json 参数优先用 `Param.summary` 里写好的字面量（如 `{"node":1,"pin":"exec"}`），
-    这样能直接复制粘贴；没有字面量时退回中性占位（并标注需替换），不伪造可直接信的值。
+    `OpSpec.example` 优先（作者手写的可复制示例）；否则从 params 推一个中性占位。
+    json 参数取 `Param.summary` 里写好的字面量（如 `{"node":1,"pin":"exec"}`）。
     """
+    if spec.example:
+        return spec.example
     parts: list[str] = []
     for p in spec.params[:2]:
         if p.kind in ("int", "float"):
@@ -449,7 +503,11 @@ def example_args(spec: OpSpec) -> str:
 
 
 def format_ops_list() -> str:
-    """engine_help 无参 / CLI `ops` 的输出：按类别列出一行式 op 目录。"""
+    """engine_help 无参 / CLI `ops` 的输出：按类别列出一行式 op 目录。
+
+    尾部附 **非 op 通道**（CLI 子命令）—— 它们不走命令总线，但同属可用能力，
+    不列出来就只能靠猜（`probe` 曾经就是这样被埋掉的）。
+    """
     lines: list[str] = ["engine op 目录（engine-editor-cli call <op> k=v ...）:"]
     for cat, label in CATEGORY_ORDER:
         items = [o for o in OPS.values() if o.category == cat and not o.internal]
@@ -458,7 +516,13 @@ def format_ops_list() -> str:
         lines.append(f"[{label}]")
         for o in items:
             lines.append(f"  {o.name} — {o.summary}")
-    lines.append("详情: engine-editor-cli help <op>  或  engine_help(op)")
+    lines.append("")
+    lines.append("[非 op 通道 — CLI 子命令，不经过命令总线]")
+    for name, summary in CLI_COMMANDS:
+        lines.append(f"  {name} — {summary}")
+    lines.append("")
+    lines.append("帮助: engine-editor-cli help <op|主题>  ·  engine_help(op|主题)")
+    lines.append("主题: " + ", ".join(sorted(TOPIC_HELP)))
     return "\n".join(lines)
 
 

@@ -46,6 +46,7 @@
 ## 3. 播放器契约
 
 - **启动顺序（run 模式）**：`prepare_offline` → 窗口标志（含 OVERLAY 透明/置顶/穿透）→
+  `apply_start_preferences(mode, w, h, overlay=…)`（**必须在 `init()` 建窗口之前**）→
   `GameRuntime.init()` → `activate_resources` → `SceneManager.SyncFromScene` →
   `cam_mgr._apply`（按 game_type 选机位）→ `RuntimeNodeLayer.set_canvas/set_scene(copy)` +
   `set_context_hooks(on_stop_request=None)` → push layers → `GameRuntime.run()`。
@@ -54,7 +55,10 @@
   `cam_mgr.create_defaults()`（依赖 `ResourceManager.Init` 已加载内置 prefab）。
 - **`--dry-run`**：不建窗口；`ResourceManager.Init` → 加载器全链路 → 原始场景 JSON 走
   MCP 校验链路（`validate_static` + `dry_run_simulation`）。
-- **窗口模式**：`game.json window.mode` 显式配置优先，"auto" 时由 `scene.game_type` 决定。
+- **窗口模式**：`game.json` 的 `window: {mode, width, height}` —— 显式 `mode` 优先，"auto" 时由
+  `scene.game_type` 决定（overlay → `overlay`，其余 → `windowed`）。`mode="overlay"` 或 overlay 场景
+  一律落到 **无边框全屏**（标题栏隐藏 + 铺满显示器；`width/height` 只对窗口化生效）。
+  实机验证：`Game (PIE)`/成品窗口外框 = `0,0 1920×1080`、`caption=False`、`layered/topmost=True`。
 - **工作目录**：始终 = 包根（builtin 资源是 CWD 相对路径）；播放器不 chdir。
 - **收尾**：run 返回后调 `SerialParallelDevice.stop()` + `VirtualDevice.close_all()` 安全网。
 

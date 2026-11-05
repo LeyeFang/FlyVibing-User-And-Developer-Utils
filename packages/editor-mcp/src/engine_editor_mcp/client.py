@@ -120,8 +120,11 @@ def encode_and_save(target: str, result: dict, payload: bytes) -> tuple[str, byt
 def fetch_raw_frame(target: str = "editor", timeout_s: float = 6.0) -> dict:
     """抓帧并返回裸帧（不编码 PNG）。
 
-    Returns: {"width", "height", "payload": bytes(RGBA8, bottom-up), "generation"}
+    Returns: {"width", "height", "payload": bytes(RGBA8, bottom-up), "generation", "blank"}
     像素采样（probe）与 PNG 落盘（capture）共用此流程。
+
+    `blank=True` 表示引擎读回的整帧全 0（RGBA 全透明）—— 通常是上下文刚建/窗口
+    还没画/被遮挡，不是"画面里的颜色是黑的"。
     """
     result, _ = send_raw("frame.request", {"target": target})
     if "error" in result:
@@ -137,7 +140,8 @@ def fetch_raw_frame(target: str = "editor", timeout_s: float = 6.0) -> dict:
             if payload is None:
                 raise EngineError("ready frame without payload")
             return {"width": int(info["width"]), "height": int(info["height"]),
-                    "payload": payload, "generation": info.get("generation")}
+                    "payload": payload, "generation": info.get("generation"),
+                    "blank": bool(info.get("blank"))}
         state = info.get("state")
         if state == "error":
             raise EngineError(info.get("error") or "engine-side capture failed")

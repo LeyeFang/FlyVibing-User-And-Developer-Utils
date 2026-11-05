@@ -709,7 +709,7 @@ def apply_profile(profile: str) -> str:
 
 @mcp.tool()
 def engine_help(op: str = "") -> str:
-    """Op 目录（无参）/ 单 op 详情 / 主题（mcp, cli, skill, capture）。按需读取，不常驻上下文。"""
+    """Op 目录（无参）/ 单 op 详情 / 主题（mcp, cli, probe, exitcodes, skill, capture）。按需读取，不常驻上下文。"""
     topic = (op or "").strip()
     if not topic or topic in ("ops", "all"):
         return op_registry.format_ops_list()

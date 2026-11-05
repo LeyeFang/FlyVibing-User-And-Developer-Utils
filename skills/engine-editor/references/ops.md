@@ -8,13 +8,14 @@
 
 ### `sim.play`
 
-启动 PIE（等同 Run 按钮；启动前硬预检，force=true 跳过）
+启动 PIE（等同 Run 按钮；启动前硬预检，force 跳过 / auto_fix 自动修）
 
-预检只看“必然不生效”的状态（如未注册节点类型 → 图不会求值）。被拦时返回 {"error": "preflight_failed", "problems": [...]}，原因同时写入 sim.state 的 last_error。
+预检只看“必然不生效”的状态（如未注册节点类型 → 图不会求值）。被拦时返回 {"error": "preflight_failed", "problems": [...]}，每条带 fix（可复制命令）与 owners（缺哪个扩展）；原因同时写入 sim.state 的 last_error，force 运行时 sim.state 会一直带 forced_unknown_types。
 
 - `force` (bool, 可选) — true=跳过未知节点类型等预检硬拦（默认 false）
+- `auto_fix` (bool, 可选) — true=先启用缺失扩展并就地补全画布节点，再启动
 
-- 示例: `engine-editor-cli call sim.play force=true`
+- 示例: `engine-editor-cli call sim.play force=true auto_fix=true`
 
 ### `sim.stop`
 
@@ -200,7 +201,7 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 - `name` (str, 可选) — 实体名
 - `parent` (str, 可选) — 父实体 id/名称；"none"=强制根实体
 
-- 示例: `engine-editor-cli call entity.add name=VALUE parent=VALUE`
+- 示例: `engine-editor-cli call entity.add name=JudgeGreen parent="none"`
 
 ### `entity.rename`
 
@@ -238,7 +239,7 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 - `local` (bool, 可选) — 本地坐标
 - `relative` (bool, 可选) — 位移加/旋转加/缩放乘（gizmo 语义）
 
-- 示例: `engine-editor-cli call entity.transform id=5 name=VALUE`
+- 示例: `engine-editor-cli call entity.transform name=JudgeGreen position=[0,6,0]`
 
 ### `entity.visible`
 
@@ -364,7 +365,7 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 - `name` (str, 必填) — 场景名（scene.list）
 - `reload` (bool, 可选) — true=从该场景的 .scene 文件重新读取（手改 JSON 后用）
 
-- 示例: `engine-editor-cli call scene.switch name=VALUE reload=true`
+- 示例: `engine-editor-cli call scene.switch name=MI-SSSEP`
 
 ### `scene.create`
 
@@ -388,7 +389,7 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 
 - `path` (str, 必填) — .scene 文件路径（相对/绝对）
 
-- 示例: `engine-editor-cli call scene.load path=VALUE`
+- 示例: `engine-editor-cli call scene.load path=scenes/MI-SSSEP.scene`
 
 ## 资源
 
@@ -455,7 +456,7 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 - `from` (json, 必填) — {"node":1,"pin":"exec"}
 - `to` (json, 必填) — {"node":2,"pin":"exec_in"}
 
-- 示例: `engine-editor-cli call graph.link from={"node":1,"pin":"exec"} to={"node":2,"pin":"exec_in"}`
+- 示例: `engine-editor-cli call graph.link from={"node":402,"pin":"Value"} to={"node":10800,"pin":"MICode"}`
 
 ### `graph.unlink`
 
@@ -465,7 +466,7 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 - `from` (json, 可选) — {"node":1,"pin":"exec"}（与 to 成对）
 - `to` (json, 可选) — {"node":2,"pin":"exec_in"}（与 from 成对）
 
-- 示例: `engine-editor-cli call graph.unlink link=0 from={"node":1,"pin":"exec"}`
+- 示例: `engine-editor-cli call graph.unlink link=500`
 
 ### `graph.remove_node`
 
@@ -474,7 +475,7 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 - `node` (int, 可选) — 节点 id
 - `nodes` (json, 可选) — [id, ...] 批量删除（不存在的 id 进 missing）
 
-- 示例: `engine-editor-cli call graph.remove_node node=0 nodes=[id, ...] 批量删除`
+- 示例: `engine-editor-cli call graph.remove_node nodes=[10800,10801]`
 
 ### `graph.set_props`
 
@@ -483,7 +484,7 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 - `node` (int, 必填) — 节点 id
 - `props` (json, 必填) — {"frequency": 10}
 
-- 示例: `engine-editor-cli call graph.set_props node=5 props={"frequency": 10}`
+- 示例: `engine-editor-cli call graph.set_props node=10800 props={"frequency": 10}`
 
 ### `graph.set_description`
 
@@ -671,7 +672,17 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 - `enabled` (bool, 可选) — 总开关
 - `events` (json, 可选) — [key, ...] 或 "a,b"；未知 key 丢弃
 
-- 示例: `engine-editor-cli call debug.events enabled=true events=[key, ...] 或 "a,b"；未知 key 丢弃`
+- 示例: `engine-editor-cli call debug.events events=["input.key","scene.new"]`
+
+## 输入热键
+
+### `hotkeys.list`
+
+热键总表（Help ▸ Hot Keys 面板同源注册表；key/mouse + scope + 说明）
+
+- `scope` (enum, 可选) — editor / viewport / node_editor / pie（省略 = 全部）
+
+- 示例: `engine-editor-cli call hotkeys.list scope=viewport`
 
 ## 线程诊断
 

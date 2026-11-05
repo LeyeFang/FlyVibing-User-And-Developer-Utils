@@ -69,7 +69,9 @@ engine-editor-cli exec build_scene.py        # 脚本模式（见 §4）
 engine-editor-cli validate                   # 干跑校验（默认 summary）
 engine-editor-cli validate --detail full --save report.json
 engine-editor-cli capture pie --out cue.png  # 抓帧（只回路径）
-engine-editor-cli probe editor --points 160:120;800:450   # 像素采样（顶左坐标 → RGBA; 免图像通道）
+engine-editor-cli probe pie --points 160:120;800:450   # 像素采样（顶左坐标 → RGBA; 免图像通道）
+engine-editor-cli help probe                 # probe 完整语义（与 capture 同一帧、editor 采样边界）
+engine-editor-cli help exitcodes             # 退出码 / stdout-JSON / stderr 可丢（写脚本前看）
 engine-editor-cli call renderer.snapshot     # 渲染器状态（后端/GL/资源计数/帧统计）
 engine-editor-cli call project.save          # 保存工程（当前路径; 带 path=Save As）
 engine-editor-cli call project.export target_parent=D:/out include_player=true   # 导出成品（含 runtime; 分钟级）
@@ -82,6 +84,8 @@ engine-editor-cli doc tools              # 开发工具索引（test_runner / th
 - 值解析：先按 JSON（数字/true/false/数组/对象/带引号字符串），失败按纯字符串；`parent=none` 即字符串。
 - Windows 终端里数组/对象**要加引号**（PowerShell 用单引号包 `'[1,0,2]'`）。
 - 未知 op 会退出码 2 并给出相近建议；`_unknown_args` 字段提示拼错的参数名。
+- **非 op 子命令**（不走命令总线）：`capture` / `probe` / `validate` / `launch` / `engines` / `exec` / `doc` / `setup` —
+  逐个列在 `ops` 目录的「非 op 通道」段；主题帮助: `help probe` / `help exitcodes` / `help cli` / `help capture`。
 
 ## 3. 常用 op（完整表: `references/ops.md`）
 

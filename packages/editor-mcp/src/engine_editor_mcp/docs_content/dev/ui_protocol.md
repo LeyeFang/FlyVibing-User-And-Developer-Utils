@@ -179,18 +179,40 @@
 > 归属设置面板 — ScenePanel 回归"场景信息 + 运行控制"单一职责。
 
 - **位置**：Edit ▸ Preferences… ▸ 左列表 `Export`；**下次 Run 生效**。
-- **选项**：显示模式（窗口化 / 无边窗口 / 独占全屏）+ 窗口化尺寸（预设 1280×720 / 1600×900 /
-  1920×1080 + 宽高输入；非窗口化时尺寸控件 disabled）。宽度/高度钳制委托
-  `SimulationController.set_pie_settings`（320..7680）。
-- **持久化**：`Application/Editor/Config/PIE.json`（`{"mode", "width", "height"}`；
+- **选项按场景类型差异化**（ScenePanel 的 3D/2D/Overlay 按钮 = 同一信源
+  `SceneBrowserController.get_game_type()`；画像由 `SimulationController.get_window_profile(gt)` 给出）：
+
+  | 场景类型 | 可选模式 | 尺寸控件 | 说明 |
+  |---|---|---|---|
+  | 3D / 2D | 窗口化 / 无边框全屏 / 独占全屏 | 窗口化时可用（预设 1280×720 / 1600×900 / 1920×1080 + 宽高输入） | 常规形态 |
+  | Overlay | **固定无边框全屏**（无下拉、无尺寸控件） | 无 | 覆盖层：标题栏必须隐藏 + 铺满显示器 |
+
+- **Overlay 为什么只给一种**：独占全屏不支持透明帧缓冲（透明与输入穿透会失效，`glfwWindow` 有
+  WARNING），窗口化会露出标题栏且不铺满屏幕；故 `SimulationController._OVERLAY_MODE = "borderless"`，
+  配置里的模式/尺寸对 Overlay 一律忽略。
+- **持久化**：`Application/Editor/Config/PIE.json`（`{"mode", "width", "height"}` — 2D/3D 用；
   懒加载 + 修改即存；缺失/损坏 → 默认值不报错）。
   ⚠ 手写该文件用无 BOM UTF-8（PS 5.1 `Set-Content -Encoding UTF8` 带 BOM → JSON 解析失败回默认值）。
 - **应用链**：`SimulationController._apply_pie_window_prefs(game_type)`（Play 消费时、
-  `GameRuntime.start` 之前）→ `RuntimeWindow.apply_start_preferences(mode, w, h)`
-  （`_window_mode` + `_default_size_override`）→ `Window._compute_default_size` 读取覆盖。
-  Overlay 场景 + 独占全屏 → 自动回退 borderless（透明窗口不兼容独占全屏）。
+  `GameRuntime.start` 之前）→ `RuntimeWindow.apply_start_preferences(mode, w, h, overlay=...)`
+  （`_window_mode` + `_default_size_override`；`overlay=True` 或 `mode="overlay"` → 强制 BORDERLESS）
+  → `Window._compute_default_size` 读取覆盖。
+- **无边框几何（覆盖层必须真铺满）**：`glfwWindow._create_window` / `set_window_mode` 的顺序是
+  **先 `_win32_strip_chrome`（剥标题栏/边框）→ 再 `_win32_fill_rect(hwnd, 0, 0, 屏宽, 屏高)`**。
+  反过来做（先定位尺寸再剥 chrome）客户区会带 chrome 偏移：实测 `-8,-31 1936×1100 @1920×1080`
+  （左上溢出屏外、右下留缝）。
+- **输入穿透（命中判定）**：`glfwWindow._update_click_through_state` 每帧用**真实光标**
+  （`glfw.get_cursor_pos`，窗口坐标）推进 pick 采样点（`_sync_pick_cursor` → `renderer.update_pick_mouse`，
+  按 framebuffer/window 比例换算像素），再由 `_is_click_through_target` 决定 `WS_EX_TRANSPARENT`。
+  ⚠ 穿透窗口在透明处**收不到 `WM_MOUSEMOVE`**，只靠事件路径（`MouseMoveEvent`）会把采样点冻在旧位置。
+- **导出成品同语义**：`game.json` 的 `{"window": {"mode", "width", "height"}}` 由
+  `PlayerBootstrap.run` 交给同一个 `apply_start_preferences`（`mode=overlay` 或 overlay 场景 → 无边框全屏）。
 - **agent 侧**：无专 op（设置面板 ≠ agent op 面；见 §13.5）。
-- **测试**：`Test/Application/Editor/test_pie_settings.py`（core；持久化/钳位/映射/Overlay 回退）。
+- **实机自检**：`python Utils/Dev/overlay_probe.py --content <x,y> --blank <x,y>`
+  （Win32 断言：整屏 + 无标题栏/边框 + LAYERED/TOPMOST；真实光标下 `WS_EX_TRANSPARENT`
+  在有内容处关闭、透明处打开）。`Test/_runs/` 下可复现截图与像素采样。
+- **测试**：`Test/Application/Editor/test_pie_settings.py`（core；持久化/钳位/映射/Overlay 强制 borderless/profile/导出窗口字段）；
+  `Test/Application/Core/test_window_click_through.py`（core；铺满顺序 + 穿透命中源，无 GL）。
 
 ---
 
@@ -277,6 +299,7 @@
 | `settings.get` | Settings 面板 ▸ Common（选项本体） | 无（只读） | D |
 | `settings.set` | Settings 面板 ▸ Common / Export；Edit ▸ Preferences… | 控件值即时反映新值；字体缩放/语言在下一渲染帧生效（含面板标题） | D + Q |
 | `debug.events` | Settings ▸ Debug ▸ Terminal（开关 + 事件类型勾选） | 勾选变化即时生效；未勾选的事件不打印且不 consume（与旧 `_SILENT_EVENTS` 同行为） | D |
+| `hotkeys.list` | Help ▸ Hot Keys…（面板只读总表本体） | 无（只读快照；`scope` 过滤 editor/viewport/node_editor/pie） | D |
 | `device.save` | —（agent / 节点 `SaveDeviceData` 同实现） | 返回 paths / meta_path / samples / duration_s / written / scope；不改变录制状态 | — |
 | `console.tail` | —（agent 诊断；stdout/stderr tee 环形缓冲） | 返回 seq/level/text 行（since 增量轮询） | — |
 | `frame.request` / `frame.fetch` | —（内部；`engine_capture` 封装） | — | — |
@@ -501,3 +524,41 @@ python Utils/Dev/test_map.py ui render
   `test_ui_map.py` 在 core 批次守卫 source/test/scenario/action 引用。
 - GUI 场景已由 runner 自动发现：`python Utils/Dev/test_runner.py --tier gui`。
 
+---
+
+## 15. 输入热键注册体系（2026-11-04）
+
+> 动机：热键散在 `EditorInputLayer`（G/R/S/Space 事件分支）、节点编辑器（Delete）、
+> `glfwWindow` / 运行时（Esc），主菜单里还挂着一批**没接线**的快捷键标注（Ctrl+N/S/Z…）。
+> 人和 agent 都无法回答"按这个键会发生什么"。
+
+**单一事实源**：`Application/Core/Input/Hotkeys.py`（数据 + 和弦解析 + 排序/快照，**不 import imgui**
+— Core 会进导出成品）＋ `Application/Editor/HotkeyActions.py`（编辑器动作实现 + 注册）
+＋ `Application/Editor/HotkeyDispatch.py`（ImGui 匹配与派发 `poll()` / `fired()`）。
+
+| 消费方 | 取数方式 |
+|---|---|
+| 人（GUI） | Help ▸ Hot Keys… → `HotkeysPanel`（只读表：scope 分组 + 过滤 + 鼠标提示开关） |
+| agent（CLI/MCP） | `hotkeys.list`（可选 `scope`）→ `{count, scopes, hotkeys[]}`，与面板同一 `snapshot()` |
+| 真实按键 | `poll()`（每帧 ImGui 帧首，派发 `dispatch=global`）/ `fired(id)`（拥有者按语境询问） |
+
+**数据口径**
+
+| 字段 | 取值 | 含义 |
+|---|---|---|
+| `kind` | `key` / `mouse` | `mouse` 仅提示（`MMB drag` / `Wheel`），不参与派发 |
+| `dispatch` | `global` / `owner` | `global` 由 `poll()` 派发（`impl` 必填）；`owner` 由拥有者在自己的上下文里 `fired(id)` |
+| `scope` | `editor` / `viewport` / `node_editor` / `pie` | 面板分组顺序 |
+| `description_key` | `hotkey.<id>` | en/zh 双语；`i18n_tool` 把 `hotkey.` 视为动态命名空间，由 `test_hotkeys.py` 保证覆盖 |
+
+**约束（启动期即失败，不是文档约定）**
+
+1. 重复 `id`、同一 scope 内重复和弦、`global` 无 `impl`、未知 scope/kind/dispatch → `ValueError`。
+2. **先有实现才注册**：菜单里没接线的占位不登记（否则面板又变成"写着但按了没用"）。
+3. 文本框聚焦（`io.want_capture_keyboard` / `want_text_input`）时热键一律让路。
+4. 迁移后不再有硬编码键位：`EditorInputLayer` 的 G/R/S/Space 分支已删除，改由注册表派发；
+   节点编辑器 Delete 改为 `fired("node_editor.delete")`（顺带修掉"文本框里按 Delete 删节点"）。
+
+**测试**：`Test/Application/Core/test_hotkeys.py`（core，29 checks）：和弦解析/规范化、
+注册约束、生产表每条都有 en/zh 文案、`hotkeys.list` 在 ops + `LiveCommandServer` 双注册、
+面板数据与注册表逐条相同、`EditorInputLayer` 无残留键位。

@@ -92,15 +92,32 @@ engine-editor-cli call sim.stop
 ```
 
 ## 5. 干跑校验（dry-run）语义与排错
-
 - 校验在**引擎内服务**执行：静态规则 + fake-time 模拟（默认 360 帧 @60fps，seed=0 确定性）。
 - `source=canvas`（默认，当前画布）/ `source=graph`（先验 agent 生成的图，不用先导进画布）：
   `engine-editor-cli validate --source graph --graph @proposed.json`
 - 报告结构：`report.ok` / `counts` / `static.errors/warnings` / `runtime.errors` / `log`；
   `static` 与 `runtime` 条目带 `node_id` → 用 `selection.set id=<node_id>` 在画布定位，`graph.set_props` 修正后重校验。
 - **副作用隔离**：设备走 stub、实体生成/显隐等副作用只记日志（dryrun# 命名空间，结束自动清理）。
-- 注意：`EntityGet` 类节点在干跑中查不到真实实体（提示 `[EntityGet] 'x' not found`，不计 error）——防御写法不受影响。
+- 注意：`EntityGet` 类节点在干跑中能解析**场景里真实存在的实体名**（干跑注入只读假场景），
+  只有引用了不存在的名字才记一条结构化 `not_found`（不计 error）。
 - 完整日志：`--detail full` 或 `--save report.txt`（文本更易读）。
+
+## 5.1 像素验证（截图 + 采样 + 标定）
+
+图像通道不可用（或只想断言一个点）时用 `probe`：
+
+```powershell
+engine-editor-cli call renderer.snapshot          # 拿 viewport 尺寸（如 1600x900）
+engine-editor-cli probe pie --points "400:300 800:450"    # 顶左坐标；PowerShell 用引号包住
+engine-editor-cli capture pie --out frame.png      # 需要人看时再落盘
+```
+
+- `probe` 与 `capture` **同一条抓帧流程**（`client.fetch_raw_frame`）：同一 framebuffer、
+  同一缩放、同一顶左坐标系 —— 已验证：同一坐标的 PNG 像素 == probe 返回的 RGBA。
+- 回执 `frame.blank=true` 表示**整帧全透明**（上下文刚建 / 窗口未呈现 / 被遮挡），
+  不是“画面是黑的”；`probe` 会自动重抓（默认 3 次，`--no-retry` 关闭）。
+- 采样点必须落在目标视口内，否则该点返回 `rgba=null + error`。
+- 验证场景内容优先用 `probe pie`；`probe editor` 采的是编辑器视口（含面板/网格）。
 
 ## 6. MCP lite 等价调用（无终端时的通道）
 
@@ -170,3 +187,34 @@ engine-editor-cli exec filter_report.py
 
 - 所有命令在编辑器未运行时**立刻返回** `编辑器未运行（127.0.0.1:<port> 无监听）— 请先启动 startup.bat。`（exit code 1）。
 - 不要自动反复重试；提醒用户启动编辑器后继续。
+
+## 9. PIE 被预检拦住：缺扩展 / 未知节点（2026-11-03）
+
+```powershell
+engine-editor-cli call sim.play
+# {"error":"preflight_failed","problems":[{"code":"unknown_node_types",
+#   "types":["ext.<id>.Foo"],"owners":["<id>"],
+#   "fix":["extension.enable id=<id>","sim.play"]}]}
+
+engine-editor-cli call sim.play auto_fix=true    # 一键：启用缺失扩展 → 画布就地补全 → 启动
+engine-editor-cli call extension.enable id=<id>  # 或手动（不需要重载场景）
+```
+
+- `extension.enable` 成功后会返回 `rehydrated_nodes`：这些是刚从"未注册"恢复成正常节点的 id。
+- 反过来，**停用**一个画布上还有节点的扩展时，回执带 `unresolved_nodes` + 警告 ——
+  面板 X = 停用（`close_policy="disable"`）的扩展属于这种；想只看不跑请用 `close_policy="hide"`。
+- `sim.play force=true` 仍然可以强跑，但 `sim.state.forced_unknown_types` 会一直带着清单，
+  运行期每 ~5 秒在控制台提醒一次（这些节点不会被执行）。
+
+## 10. 场景变白 / 材质不对（材质 id 漂移）
+
+```powershell
+engine-editor-cli call project.open path=...
+# 回执里看 reference_audit：
+#   missing_materials / missing_meshes  → 引用指向不存在的 id（资产没加载/名字对不上）
+#   unresolved_refs                     → material_path 解析失败（文件搬走了）
+engine-editor-cli call scene.save                   # 保存一次 → 后续场景自带 material_path，可自愈
+engine-editor-cli call entity.get name=JudgeGreen   # 核对实际材质
+```
+
+原因：材质 id 是**会话级自增**的，不是持久身份。详见 `doc show dev/scene_format#2.1`。

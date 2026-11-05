@@ -99,6 +99,9 @@ SUMMARY: 11/12 passed in 84s | failed: test_x | tier=core | skipped=5 | runs: Te
 - 验收模板（新 op 实机验证）：`view.set_grid` on/off 截图对比（`Test/_runs/e2e_grid/`）—— 行为断言走 core 回环 + scenario，视觉证据走 e2e 截图。
 - 节点组交互模板：`Test/Application/Editor/test_e2e_node_group_live.py`（`TIER: live`）—— 实机鼠标拖标题/拖出拖入成员/从组端口拖线，断言 view 矩形 + `graph.list` 连线，快照落 `Test/_runs/e2e_node_group_live/`。
 - 线程探针：`python Utils/Dev/thread_probe.py --assert-alive <name,...>`（协议 `threading_protocol.md` §4）。
+- 覆盖层窗口探针：`python Utils/Dev/overlay_probe.py --content 960,540 --blank 300,300`
+  （Win32，需 overlay PIE 运行中）—— 断言 PIE 窗口 `0,0,整屏` + 无标题栏/边框 + LAYERED/TOPMOST，
+  并用真实光标验证 `WS_EX_TRANSPARENT` 在"有内容 / 透明处"正确翻转（协议 `ui_protocol.md` §9）。
 
 ## 7. 测试地图（按域）
 

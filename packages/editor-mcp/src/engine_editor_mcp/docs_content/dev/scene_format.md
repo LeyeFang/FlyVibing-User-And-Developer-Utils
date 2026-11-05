@@ -32,6 +32,7 @@
    加载时打印 `[NodeCanvas] WARNING: unknown node type(s)`，并把清单记到
    `canvas.unknown_node_types`；`sim.play` 会**拒绝启动**（`force=true` 可强跑），
    `graph.validate` 报 `unknown_type` error。原因九成是扩展没启用。
+   启用扩展（`extension.enable`）后画布会**就地补全**这些节点，不需要重载场景。
 3. 场景坐标是 GL 系，**不是**编辑器系（见 §4）。
 
 ## 2. 实体条目
@@ -64,6 +65,31 @@
 - 旋转字段是**弧度**。op 层（`entity.transform`）用度，落盘换成弧度 —— 手改 JSON 时
   自己换算（`rad = deg * π / 180`）。
 - 组件按名字做 key；没写的组件 = 实体没有该组件。
+
+### 2.1 材质引用：`material_id` 不是持久化身份（2026-11-03）
+
+`MeshRenderer.material_id` 是**会话级自增 id**：换一个会话、或会话里先开过别的工程，
+同一个数字可能指向完全不同的材质（实测就会把 cue 画成默认白，而且不报错）。
+
+所以现在保存场景时会同时写一个**稳定引用**：
+
+```jsonc
+"MeshRenderer": {
+  "mesh_id": 1,
+  "material_id": 5,                                     // 会话内快照（仅供参考）
+  "material_path": "C:/…/assets/materials/cue.mat"     // 稳定引用（builtin://Default 或磁盘路径）
+}
+```
+
+加载规则：
+
+1. 有 `material_path` → 解析成本会话的 live id（精确路径 → 文件名唯一匹配回退）；
+2. 解析不到 → 记一条引用告警，`project.open` / `scene.load` 结果里可见（不再静默）；
+3. 没有 `material_path`（旧文件）→ 仍靠 `.myproj` 的 `id_map`，**保存一次就会补上**。
+
+验证口径：`project.open` 的 `reference_audit`（`missing_materials` / `missing_meshes` /
+`unresolved_refs`）。手改场景里的材质时，建议同时改 `material_id` 和 `material_path`，
+或只用 op（`component.set`）改。
 
 ## 3. 节点图：`links` 是 pin 级，不是节点级
 

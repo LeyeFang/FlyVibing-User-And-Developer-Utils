@@ -95,7 +95,7 @@ def _sync_skill() -> None:
     shutil.rmtree(dest, ignore_errors=True)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     shutil.copytree(src, dest)
-    print(f"  ✓ skill 已同步 → {dest}")
+    print(f"  [ok] skill 已同步 → {dest}")
 
 
 def install(profile: str = "lite", port: int | None = None) -> int:
@@ -105,9 +105,9 @@ def install(profile: str = "lite", port: int | None = None) -> int:
 
     try:
         import mcp  # noqa: F401
-        print("  ✓ mcp package importable")
+        print("  [ok] mcp package importable")
     except ImportError:
-        print("  ✗ mcp 包不可用 — 先运行 Utils/Dev/setup_env.bat（或 pip install mcp）")
+        print("  [!!] mcp 包不可用 — 先运行 Utils/Dev/setup_env.bat（或 pip install mcp）")
         return 1
 
     config_path = _mcp_path()
@@ -124,11 +124,11 @@ def install(profile: str = "lite", port: int | None = None) -> int:
     }
     _write_config(config_path, config)
     extra = f" --port {port}" if port is not None else ""
-    print(f"  ✓ 注册 '{SERVER_NAME}'（profile={profile}） → {config_path}")
+    print(f"  [ok] 注册 '{SERVER_NAME}'（profile={profile}） → {config_path}")
     print(f"    command: {_python_command()} -m engine_editor_mcp --profile {profile}{extra}")
 
     server_src = os.path.join(_PACKAGE_DIR, "mcp_server.py")
-    print(f"  ✓ mcp_server.py: {'found' if os.path.isfile(server_src) else 'MISSING!'}")
+    print(f"  [ok] mcp_server.py: {'found' if os.path.isfile(server_src) else 'MISSING!'}")
     _sync_skill()
     print()
     print("下一步: 重载 VS Code 窗口（或 Command Palette → 'MCP: List Servers' 重启）")
@@ -141,13 +141,13 @@ def uninstall() -> int:
     config = _read_config(config_path)
     if config.get("servers", {}).pop(SERVER_NAME, None) is not None:
         _write_config(config_path, config)
-        print(f"  ✓ 已移除 '{SERVER_NAME}'")
+        print(f"  [ok] 已移除 '{SERVER_NAME}'")
     else:
         print(f"  - '{SERVER_NAME}' 未注册")
     dest = _skill_dest()
     if os.path.isdir(dest):
         shutil.rmtree(dest, ignore_errors=True)
-        print(f"  ✓ 已移除 skill: {dest}")
+        print(f"  [ok] 已移除 skill: {dest}")
     return 0
 
 

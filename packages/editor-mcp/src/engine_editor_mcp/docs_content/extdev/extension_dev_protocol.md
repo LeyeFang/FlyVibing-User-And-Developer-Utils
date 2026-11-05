@@ -116,8 +116,25 @@ engine-editor-cli call ext.mything.info                # 扩展 op 直接可调�
 3. 场景里留了 `ext.<id>.*` 节点但扩展没启用 → 节点保留但**不求值**：
    `graph.validate` 报 `unknown_type`，`sim.play` 直接拒绝启动（见 `dev/scene_format` §1）。
    这是特意的硬拦截 —— 别把它当成"图没生效的玄学"。
+   `extension.enable` 之后画布会**就地补全**这些节点（不需要重载场景），
+   `sim.play auto_fix=true` 可以一键 enable 后直接跑。
 4. `extension.list` 是运行期的唯一事实源（`enabled` / `disabled` / `broken`）；`broken`
    的 `error` 字段会给出 manifest / import 的具体原因。
+
+### 3.2 面板关闭语义：`close_policy` 别乱用 `disable`（2026-11-03 补）
+
+`ctx.ui.register_window(..., close_policy=...)` 有三档，默认 `"hide"`：
+
+| 值 | 用户点窗口 X 之后 | 适用 |
+|---|---|---|
+| `"hide"`（默认） | 只隐藏窗口；扩展继续运行，可从菜单/`extension.enable` 重新打开 | **设备类 / 后台服务类扩展**（图上的节点依赖它，用户只是"不想看了"） |
+| `"disable"` | 请求停用整个扩展（持久化到下次启动，其 `ext.<id>.*` 节点立刻变成未注册） | 极少数"面板就是功能本体"的扩展 |
+| `"custom"` | 只回调 `on_ui_event`，由扩展自己决定 | 自定义生命周期 |
+
+⚠️ 对**设备/数据采集类**扩展用 `disable` 是反直觉的：用户的意图通常是"收起面板"，
+结果却让整张图在下次 PIE 时被预检拒绝。宿主的边界提示：`extension.disable`
+（含面板 X 触发的停用）在画布上还有该扩展节点时会返回
+`unresolved_nodes` + 警告，并在控制台点名。
 
 ## 4. manifest 参考（extension.json）
 

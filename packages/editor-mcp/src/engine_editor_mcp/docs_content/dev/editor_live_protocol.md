@@ -234,11 +234,14 @@ UI 入口：Node Editor 工具栏 **Validate** 按钮（静态 / 360 帧 / 600 �
   - 脚本请**判退出码**，不要 grep 输出。
 - **`probe`（像素验证）**：`probe pie --points 400:300;800:450` → 每个点返回 RGBA。
   `probe` 与 `capture` **共用同一条抓帧流程**（`client.fetch_raw_frame`）：同一 framebuffer、
-  同一缩放、同一**顶左**坐标系，所以"截图目测 → probe 取色"可以直接对上；
-  要精确对位时先用 probe 打一组网格标定。
-  `probe editor` 采的是编辑器视口那块 framebuffer；若整片返回 `[0,0,0,0]`，
-  先用 `renderer.snapshot` 的 `viewport` 核对待采样点是否落在视口内、窗口是否被最小化 ——
-  验证**场景内容**时优先用 `probe pie`。
+  同一缩放、同一**顶左**坐标系。已实测核对：同一坐标的 PNG 像素值 == `probe` 返回的 RGBA
+  （2026-11-01，1600x900 editor 帧，三点逐值相等）。
+  - `frame.blank=true` = **整帧全透明**（RGBA 全 0）：上下文刚建 / 窗口未呈现 / 被遮挡。
+    引擎在帧末读回时判定并随回执返回；`probe` 遇 blank 自动重抓（默认 3 次，`--no-retry` 关），
+    仍 blank 则在 stderr 说明原因 —— 不会再把 0 当成“颜色是黑的”报出去。
+  - 采样点越界返回 `rgba=null + error: out of bounds`；`probe editor` 采的是编辑器视口
+    （含面板/网格），验证**场景内容**请用 `probe pie`。
+  - 要精确对位时先用 `renderer.snapshot` 拿 `viewport` 尺寸，再打一组网格标定。
 - **Skill**（`engine-editor`, 渐进披露）：SKILL.md（通道选择/速查/纪律）+ `references/ops.md`（docgen 生成）
   + `references/workflows.md`（配方）；安装: `engine-editor-cli setup` 或仓库 `install_mcp.py`（同步到 `.github/skills/`）。
 - **帧图像**（`engine_capture`）：request → 轮询 fetch → numpy 翻转（GL bottom-up → top-down，本进程）→

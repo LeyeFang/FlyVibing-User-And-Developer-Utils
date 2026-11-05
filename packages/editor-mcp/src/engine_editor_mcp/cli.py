@@ -42,12 +42,16 @@ from .client import (
     EngineClient,
     EngineError,
     capture_png,
+    encode_and_save,
     execute_calls,
     fetch_raw_frame,
     send_raw,
     validate_graph_orchestrate,
 )
 from .launcher import LaunchError, discover_engines, launch_engine
+
+# 全透明帧（引擎标 blank）自动重抓次数 — 上下文刚建/窗口还没画首帧时能自救。
+_PROBE_BLANK_RETRIES = 3
 
 _SKILL_DIR_NAME = "engine-editor"
 _SKILL_TARGETS = {
@@ -287,16 +291,22 @@ def cmd_validate(ns) -> int:
 
 def cmd_capture(ns) -> int:
     try:
-        path, png_bytes = capture_png(ns.target, ns.timeout)
+        frame = fetch_raw_frame(ns.target, ns.timeout)
+        path, png_bytes = encode_and_save(ns.target, frame, frame["payload"])
     except EngineError as e:
-        return _fail(f"capture failed: {e}", 1)
+        return _fail(f"capture failed: {e}", 1, error="capture_failed", target=ns.target)
     out_path = path
     if ns.out:
         abs_out = os.path.abspath(ns.out)
         os.makedirs(os.path.dirname(abs_out), exist_ok=True)
         shutil.copyfile(path, abs_out)
         out_path = abs_out
-    _out({"saved": out_path, "bytes": len(png_bytes), "frames_dir": str(Path(path).parent)})
+    result = {"saved": out_path, "bytes": len(png_bytes), "frames_dir": str(Path(path).parent),
+              "blank": bool(frame.get("blank"))}
+    _out(result)
+    if result["blank"]:
+        sys.stderr.write(
+            "capture: 整帧全透明 — 目标窗口可能还没画首帧/被最小化或遮挡（PNG 已落盘但无内容）。\n")
     return 0
 
 
@@ -343,11 +353,23 @@ def cmd_probe(ns) -> int:
     """像素采样 — 裸帧（零 PNG 编码）→ 指定点 RGBA（顶左坐标系）。
 
     用途: agent 端无图像通道时的像素级断言（配合 renderer.snapshot）。
+
+    全透明帧（`blank`）没有信息量, 常见于上下文刚建/窗口还没画/被遮挡 ——
+    自动重抓最多 `_PROBE_BLANK_RETRIES` 次; 仍全透明则在回执里标 `blank=true`
+    并在 stderr 给一句原因提示（--no-retry 关闭重试）。
     """
-    try:
-        frame = fetch_raw_frame(ns.target, ns.timeout)
-    except EngineError as e:
-        return _fail(f"probe failed: {e}", 1)
+    attempts = 0
+    blank = False
+    while True:
+        attempts += 1
+        try:
+            frame = fetch_raw_frame(ns.target, ns.timeout)
+        except EngineError as e:
+            return _fail(f"probe failed: {e}", 1, error="capture_failed", target=ns.target)
+        blank = bool(frame.get("blank"))
+        if not blank or ns.no_retry or attempts > _PROBE_BLANK_RETRIES:
+            break
+        time.sleep(0.15)
     width, height, payload = frame["width"], frame["height"], frame["payload"]
     points: list[tuple[int, int]] = []
     for chunk in ns.points.replace(";", " ").split():
@@ -366,14 +388,19 @@ def cmd_probe(ns) -> int:
         idx = ((height - 1 - y) * width + x) * 4   # 裸帧 bottom-up → 顶左坐标换算
         r, g, b, a = payload[idx], payload[idx + 1], payload[idx + 2], payload[idx + 3]
         out_pixels.append({"x": x, "y": y, "rgba": [r, g, b, a]})
-    _out({"frame": {"target": ns.target, "width": width, "height": height},
+    _out({"frame": {"target": ns.target, "width": width, "height": height,
+                    "blank": blank, "attempts": attempts},
           "pixels": out_pixels})
+    if blank:
+        sys.stderr.write(
+            f"probe: 整帧全透明（{width}x{height}，重试 {attempts} 次）— 目标窗口可能还没画首帧/"
+            f"被最小化或遮挡；{ns.target} 采样的点必须落在视口内"
+            f"（尺寸见 renderer.snapshot 的 viewport）。\n")
     return 0
 
 
 def _skill_source() -> Path:
     return Path(__file__).resolve().parent / "skills" / _SKILL_DIR_NAME
-
 
 def _update_mcp_json(path: Path, python_cmd: str, profile: str, uninstall: bool,
                      port: int | None = None, engine_root: str | None = None) -> None:
@@ -461,8 +488,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("ops", help="op 目录（一行一个）")
     p.set_defaults(func=cmd_ops)
 
-    p = sub.add_parser("help", help="单 op 详情 / 主题（cli, mcp, skill, capture）")
-    p.add_argument("topic", nargs="?", default="")
+    p = sub.add_parser("help", help="单 op 详情 / 主题（cli, probe, exitcodes, mcp, skill, capture）")
+    p.add_argument("topic", nargs="?", default="",
+                   help="op 名 / 旧工具别名 / 主题（cli|probe|exitcodes|capture|mcp|skill）；缺省给 op 目录")
     p.set_defaults(func=cmd_help)
 
     p = sub.add_parser("call", help="执行一个 op")
@@ -500,10 +528,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=float, default=6.0)
     p.set_defaults(func=cmd_capture)
 
-    p = sub.add_parser("probe", help="像素采样（裸帧 → 指定点 RGBA; 顶左坐标系）")
-    p.add_argument("target", nargs="?", choices=("editor", "pie"), default="editor")
-    p.add_argument("--points", required=True, help="采样点: x:y[;x:y...]（顶左坐标系）")
+    p = sub.add_parser("probe", help="像素采样（裸帧 → 指定点 RGBA; 顶左坐标系）",
+                       epilog=("与 capture 共用同一条抓帧流程（client.fetch_raw_frame）：同一 framebuffer、"
+                               "同一缩放、同一顶左坐标系。probe pie 需 PIE 运行中；probe editor 采样点\n"
+                               "必须落在编辑器视口内（尺寸见 renderer.snapshot 的 viewport）。"))
+    p.add_argument("target", nargs="?", choices=("editor", "pie"), default="editor",
+                   help="pie = 验证场景内容（推荐）；editor = 编辑器视口")
+    p.add_argument("--points", required=True, help="采样点: x:y[;x:y...]（顶左坐标系；PowerShell 里用空格分隔并加引号）")
     p.add_argument("--timeout", type=float, default=6.0)
+    p.add_argument("--no-retry", dest="no_retry", action="store_true",
+                   help=f"全透明帧不重试（默认最多重抓 {_PROBE_BLANK_RETRIES} 次）")
     p.set_defaults(func=cmd_probe)
 
     p = sub.add_parser("doc", help="内置文档（索引优先: doc [dev|extdev] / doc outline <topic> / doc show <topic>#节 / doc search <kw>）+ 开发工具索引（doc tools / doc tool <名>）")
