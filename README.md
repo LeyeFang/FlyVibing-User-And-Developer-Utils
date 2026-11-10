@@ -47,7 +47,8 @@ This synchronizes the skills into `editor-mcp` and `node-editor`, builds the thr
 ## Releases
 
 The toolchain is distributed as a zip archive; it does not use an installer
-executable. The current release is **0.6.1**:
+executable. The current release is **0.8.0**
+(released 2026-11-11, bundled in **FlyVibingEngine 1.1.0**):
 
 ```powershell
 python scripts/release_tools.py
@@ -56,11 +57,16 @@ python scripts/release_tools.py
 The command rebuilds the wheels and writes:
 
 ```text
-dist/releases/v0.6.1/any/
-    FlyVibing-Tools-0.6.1.zip
-    FlyVibing-Tools-0.6.1.zip.sha256
+dist/releases/v0.8.0/any/
+    FlyVibing-Tools-0.8.0.zip
+    FlyVibing-Tools-0.8.0.zip.sha256
     release-manifest.json
 ```
+
+> **Version coupling.** Engine releases pin this toolchain: the pair lives in the
+> engine repo at `Utils/Dev/Installer/toolchain.lock.json` and is enforced by
+> `build_installer` (warning) and `Test/Application/Core/test_toolchain_lock.py`
+> (hard failure). Bump `VERSION` only together with that lock file.
 
 The zip contains `install.cmd` / `install.ps1` (Windows), `install.sh`
 (macOS/Linux), `install.py`, the three wheels, `CHECKSUMS.sha256`, and the

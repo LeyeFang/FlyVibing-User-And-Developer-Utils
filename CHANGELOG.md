@@ -3,14 +3,17 @@
 All notable toolchain changes are recorded here. Package versions may move
 independently; the toolchain release version is stored in `VERSION`.
 
-## 0.8.0 — 2026-11-08
+## 0.8.0 — 2026-11-11
+
+> **Released** 2026-11-11 as `dist/releases/v0.8.0/any/FlyVibing-Tools-0.8.0.zip`
+> (hash in the sibling `FlyVibing-Tools-0.8.0.zip.sha256` — self-referential, so not copied here).
+> Bundled in **FlyVibingEngine 1.1.0** (`FlyVibingEngine-Setup-1.1.0-Windows-x64.exe`).
 
 > **Pinned by FlyVibing Engine 1.1.0** (2026-11-10).
 > The engine records the pair in `Utils/Dev/Installer/toolchain.lock.json`;
 > `build_installer` warns on mismatch, and
 > `Test/Application/Core/test_toolchain_lock.py` fails if the two versions drift.
 > Do not bump `VERSION` here without a matching lock-file update on the engine side.
-
 
 > Engine side: port ledger (`Application/Editor/Services/PortLedger.py`), ops `instance.info` /
 > `instance.describe`, startup flags `--purpose/--owner/--tag/--touch/--note` (78 core ops).
