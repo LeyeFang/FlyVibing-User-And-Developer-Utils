@@ -25,6 +25,9 @@
     C8 imgui 窗口栈配对纪律：begin_child 不得被条件门控（全裁剪 0x0 时返回 False）
     C9 combo/tab_item 反向规则：end_combo/end_tab_item 仅在 begin 返回 True 时调用
     C10 无顶层 imgui 上下文/窗口/GL 创建（纯导入允许 — M0 口径）
+    M7  manifest `python` 解释器声明合法（mode/path/requirements/probe —
+        extdev protocol §11.1）
+    C12 不自备解释器: 不写死绝对 python 路径、不 Popen(sys.executable)（用 ctx.python.spawn）
     C11 不触碰宿主全局 imgui 状态（create/destroy_context、set_ini_filename、io/style 赋值 —
         含 get_io()/get_style() 链式与别名写法）
 
@@ -287,6 +290,8 @@ def review_extension(ext_dir: str) -> Report:
     else:
         rep.ok("M5", f"capabilities={caps if caps else '(未声明)'}")
 
+    _review_python_manifest(rep, manifest)
+
     if str(manifest.get("description", "")).strip():
         rep.ok("M6", "description 非空")
     else:
@@ -407,8 +412,107 @@ def review_extension(ext_dir: str) -> Report:
         else:
             rep.ok("C11", "无全局 imgui 状态写入")
 
+    _review_python_code(rep, ext_dir)
     _review_files(rep, ext_dir)
     return rep
+
+
+_PY_MODES = ("engine", "venv", "path")
+_PY_IMPORT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
+_ABS_PY_RE = re.compile(r"[A-Za-z]:[\\/][^\s\"'\n]*python(?:\.exe)?", re.IGNORECASE)
+_SPAWN_FUNCS = {"Popen", "run", "call", "check_output", "check_call", "spawnv", "spawnve"}
+
+
+def _review_python_manifest(rep: Report, manifest: dict) -> None:
+    """M7 — `python` 声明结构合法（extdev protocol §11.1）。"""
+    raw = manifest.get("python")
+    if raw in (None, "", {}):
+        rep.ok("M7", "未声明 python（默认引擎解释器）")
+        return
+    if isinstance(raw, str):
+        mode = raw.strip().lower()
+        if mode in _PY_MODES:
+            rep.ok("M7", f"python='{mode}'")
+        else:
+            rep.fail("M7", f"python='{raw}' 非法（允许 engine / venv / path）")
+        return
+    if not isinstance(raw, dict):
+        rep.fail("M7", "python 必须是字符串或对象（extdev protocol §11.1）")
+        return
+
+    problems: list[str] = []
+    mode = str(raw.get("mode") or "engine").strip().lower()
+    if mode not in _PY_MODES:
+        problems.append(f"mode={mode!r} 非法（engine/venv/path）")
+    path = str(raw.get("path") or "").strip()
+    if mode in ("venv", "path") and not path:
+        problems.append(f"mode={mode} 需要 path")
+    if path and _ABS_PY_RE.search(path) and "%" not in path:
+        problems.append(f"path 写死了机器路径 {path!r}（用 %EXT_DATA% / %EXT_DIR% 变量）")
+    req = raw.get("requirements")
+    if req not in (None, "") and not str(req).strip():
+        problems.append("requirements 不能是空串（省略即可）")
+    probe = raw.get("probe")
+    if probe is not None:
+        if not isinstance(probe, list) or not all(
+                isinstance(x, str) and _PY_IMPORT_RE.match(x) for x in probe):
+            problems.append("probe 必须是 import 名列表（如 ['serial', 'numpy']）")
+    if problems:
+        rep.fail("M7", "python 声明有问题: " + "; ".join(problems))
+    else:
+        rep.ok("M7", f"python mode={mode}"
+                     + (f" probe={probe}" if probe else ""))
+
+
+def _scan_py_files(ext_dir: str) -> list:
+    out = []
+    for cur, dirs, files in os.walk(ext_dir):
+        dirs[:] = [d for d in dirs if d not in ("__pycache__", ".git")]
+        for name in files:
+            if name.endswith(".py"):
+                out.append(os.path.join(cur, name))
+    return sorted(out)
+
+
+def _review_python_code(rep: Report, ext_dir: str) -> None:
+    """C12 — 扩展不应自备解释器（写死路径 / Popen(sys.executable)）。"""
+    hardcoded: list[str] = []
+    spawns: list[str] = []
+    for path in _scan_py_files(ext_dir):
+        rel = os.path.relpath(path, ext_dir)
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                src = fh.read()
+        except OSError:
+            continue
+        for idx, line in enumerate(src.splitlines(), 1):
+            if _ABS_PY_RE.search(line) and not line.lstrip().startswith("#"):
+                hardcoded.append(f"{rel}:{idx}")
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else (
+                func.id if isinstance(func, ast.Name) else "")
+            if name not in _SPAWN_FUNCS:
+                continue
+            for arg in list(node.args) + [kw.value for kw in node.keywords]:
+                for sub in ast.walk(arg):
+                    if (isinstance(sub, ast.Attribute) and sub.attr == "executable"
+                            and isinstance(sub.value, ast.Name) and sub.value.id == "sys"):
+                        spawns.append(f"{rel}:{getattr(node, 'lineno', 0)}")
+    if hardcoded:
+        rep.fail("C12", "写死解释器路径（换机器即断；用 manifest python.path + 变量）: "
+                 + "; ".join(hardcoded[:3]))
+    elif spawns:
+        rep.fail("C12", "用 sys.executable 自起子进程（依赖/回收都没有宿主兜底；"
+                        "改用 ctx.python.spawn）: " + "; ".join(spawns[:3]))
+    else:
+        rep.ok("C12", "未自备解释器（用 ctx.python 协议）")
 
 
 def _review_files(rep: Report, ext_dir: str) -> None:

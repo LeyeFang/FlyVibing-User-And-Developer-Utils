@@ -62,7 +62,9 @@ rst/<Name>/
   `Application/Functions/official_extensions.json`，也不要指望安装包分发。
   要给别人用，走 `project.export` 的用户态游戏包，并让使用到的扩展显式声明
   `signature`/`export`。
-- 不要把社区扩展放进 `Application/Functions/`；安装包只按 mainline allowlist 分发。
+- 不要把社区扩展放进 `Application/Functions/` 就当"内置"：那里整个目录在 `.gitignore` 里，
+  只有 allowlist 白名单行放行的才随仓库/安装包分发；其余即使放了也只是本机 `local`
+  （默认停用），换个机器就没了。
 
 ## 1.2 扩展自带 Example（推荐）
 
@@ -77,6 +79,16 @@ rst/<Name>/
 
 - 扩展 **enable** 时宿主自动登记 `<extension_dir>/Examples`；`File ▸ Open Example`
   立即出现，扩展 **disable/unload** 时自动移除。无需改 manifest，也无需复制文件。
+- **前提是扩展处于启用状态**（2026-11-10 规则，见 dev protocol §3.3）：
+  - 挂在 `Application/Functions/` 且 **在 mainline allowlist 内**（`official_extensions.json`
+    = `.gitignore` 白名单）→ `builtin`，恒激活，示例一定出现；
+  - 挂在 `Application/Functions/` 但**不在** allowlist（开发副本/社区夹具）→ `local`，
+    默认**停用**，在 Settings ▸ Extensions 勾一次即可（`extension.enable id=<你的 id>` 等价）；
+  - 装在 `%APPDATA%/FlyVibingEngine/extensions` → `user`，同样需要勾选。
+  - **提示会自己说明**：扩展停着但带 `Examples/` 时，`File ▸ Open Example` 底部会显示灰字
+    `"<扩展> — N 个示例（扩展未启用）"`，点下面那行「启用 <扩展>」就地启用，不用先找设置页。
+  - 排查"我的示例没出现"：先看 Settings ▸ Extensions 里该项的 `scope` / `status` 与示例根目录
+    合并显示（每个扩展展开详情会列出已注册根目录与数量）；`extension.list` 有同样字段。
 - 引擎只读扩展目录，**不写用户示例目录**：不会覆盖用户自建同名示例，也不会在
   卸载后留下副本。
 - 签名默认取扩展 manifest 的 `provider`（缺省 `@<id>`）；单个 `.myproj` 仍可用

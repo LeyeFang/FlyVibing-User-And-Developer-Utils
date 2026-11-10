@@ -294,6 +294,7 @@
 | `project.save` | File ▸ Save Project / Save As | 场景文件落盘、窗口标题去脏标 | — |
 | `project.export` | File ▸ Export… | 审计日志输出；目标目录旧导出被干净重建（`output/` 实验数据保留） | — |
 | `extension.list` | Extensions 菜单（列表本体） | 扩展状态/贡献 op 清单查询（扩展 op 发现入口） | D |
+| `extension.python` | —（agent 诊断/覆盖；Extensions 菜单只显示状态） | 解析结果与覆盖写入 `editor_state/extensions.json`（v2）；`extension.list` 与 `ext.<id>.status` 同步可见 | — |
 | `extension.enable` | Extensions 菜单 ▸ 勾选启用 | 勾选态、装载日志、`ext.<id>.*` op 注册（增量扫描） | D + C |
 | `extension.disable` | Extensions 菜单 ▸ 取消勾选 | 勾选态、卸载 + 扩展 op 注销 | D + C |
 | `settings.get` | Settings 面板 ▸ Common（选项本体） | 无（只读） | D |
@@ -304,6 +305,8 @@
 | `console.tail` | —（agent 诊断；stdout/stderr tee 环形缓冲） | 返回 seq/level/text 行（since 增量轮询） | — |
 | `frame.request` / `frame.fetch` | —（内部；`engine_capture` 封装） | — | — |
 | `editor.quit` | 窗口关闭按钮 | 全链清理退出（PIE 先行停止） | — |
+| `instance.info` | —（agent 启动前先查：谁占了这个端口 / 在做什么） | 只读快照（端口台账 + state / runtime_alive / uptime_s） | — |
+| `instance.describe` | —（agent 运行中改描述） | 端口台账的 purpose / owner / tags / touches / notes 更新；`engine-editor-cli ports` 立即反映 | — |
 
 **规则**
 

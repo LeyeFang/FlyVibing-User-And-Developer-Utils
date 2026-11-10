@@ -147,15 +147,15 @@ def list_groups() -> dict:
             "slots": {"entry": "exec_in", "done": "exec_out"},
         },
         "sss_pulse": {
-            "title": "一次 20 Hz SSSEP 脉冲（并口 + 串口，线性组）",
+            "title": "一次 SSSEP 脉冲（并口 + 串口，线性组）",
             "params": {
                 "value_var": "str (default sss_code)",
                 "count_var": "str (default pulse_count)",
                 "timer": "str (default pulse)",
-                "interval": "float (default -0.05)",
+                "interval": "float (default -0.0499) — 下次脉冲相对当前时间的偏移",
                 "address": "int (default 16376)",
                 "serial_port": "str (default @SSSEP-Stimulator)",
-                "serial_baud": "int (default 9600)",
+                "serial_baud": "int (default 115200)",
             },
             "slots": {"entry": "exec_in", "done": "exec_out"},
         },
@@ -1262,10 +1262,10 @@ def _sss_pulse_params(params: dict) -> tuple[dict, list[str]]:
         errors.append("params.address must be an integer")
         address = 16376
     try:
-        baud = int(params.get("serial_baud", 9600))
+        baud = int(params.get("serial_baud", 115200))
     except (TypeError, ValueError):
         errors.append("params.serial_baud must be an integer")
-        baud = 9600
+        baud = 115200
     return {
         "value_var": str(params.get("value_var", "sss_code") or "sss_code"),
         "count_var": str(params.get("count_var", "pulse_count") or "pulse_count"),

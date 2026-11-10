@@ -16,12 +16,12 @@ from __future__ import annotations
 
 import json
 import os
-import socket
 import subprocess
 import tempfile
 import time
 from pathlib import Path
 
+from . import ports
 from .client import DEFAULT_PORT, send_raw
 
 PORT_RANGE_START = DEFAULT_PORT          # 8977
@@ -79,30 +79,17 @@ def find_engine_root(explicit: str | None = None) -> Path:
 
 
 def is_port_free(port: int) -> bool:
-    """本机回环端口是否可绑定；已在监听的端口视为占用。"""
-    try:
-        with socket.create_connection(("127.0.0.1", int(port)), timeout=0.15):
-            return False
-    except (ConnectionRefusedError, socket.timeout, TimeoutError):
-        pass
-    except OSError:
-        pass
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        sock.bind(("127.0.0.1", int(port)))
-        return True
-    except OSError:
-        return False
-    finally:
-        sock.close()
+    """本机回环端口是否可绑定；已在监听的端口视为占用（实现见 `ports.is_port_free`）。"""
+    return ports.is_port_free(port)
 
 
 def choose_port(preferred: int | str | None = None,
                 start: int = PORT_RANGE_START, end: int = PORT_RANGE_END) -> int:
-    """选择端口: preferred=None/"auto" → 频段内首个空闲; 指定端口 → 必须空闲。"""
+    """选择端口: preferred=None/"auto" → 频段内首个空闲（跳过别人的启动预占）;
+    指定端口 → 必须空闲。冲突时错误信息带台账描述（谁 / 为什么 / 什么工程）。"""
     if preferred is None or str(preferred).strip().lower() in ("", "auto"):
         for port in range(int(start), int(end) + 1):
-            if is_port_free(port):
+            if is_port_free(port) and not ports.is_reserved(port):
                 return port
         raise LaunchError(f"no free editor port in {start}..{end}")
     try:
@@ -112,7 +99,11 @@ def choose_port(preferred: int | str | None = None,
     if not (1024 <= port <= 65535):
         raise LaunchError(f"port must be 1024..65535, got {port}")
     if not is_port_free(port):
-        raise LaunchError(f"port {port} is already in use — choose another port or use --port auto")
+        raise LaunchError(f"{ports.holder_hint(port)} — choose another port or use --port auto")
+    if ports.is_reserved(port):
+        raise LaunchError(f"port {port} is reserved by a starting instance "
+                          f"({ports.describe(ports.read_entry(port) or {})}) — "
+                          "another launch is in flight; use --port auto")
     return port
 
 
@@ -154,12 +145,20 @@ def launch_engine(
     language: str | None = None,
     settings: dict | None = None,
     timeout_s: float = 30.0,
+    purpose: str | None = None,
+    owner: str | None = None,
+    tags: list[str] | None = None,
+    touches: list[str] | None = None,
+    notes: str | None = None,
 ) -> dict:
     """启动一个独立的编辑器实例并等待命令总线就绪。
 
+    `purpose/owner/tags/touches/notes` 是**实例自述**（不是设置）: 启动前写进端口台账
+    （`status=starting`），引擎就绪后由引擎改写为 `ready`，供其它 agent 查端口时判断复用。
+
     Returns:
         {"ok": true, "port": N, "pid": ..., "engine_root": ..., "ready": true,
-         "state": ..., "log_path": ..., "command": [...]}
+         "state": ..., "log_path": ..., "command": [...], "ledger": {...}}
         失败会抛 LaunchError（CLI/MCP 捕获后返回 error）。
     """
     if language is not None and language not in ("en", "zh"):
@@ -167,6 +166,15 @@ def launch_engine(
     root = find_engine_root(engine_root)
     chosen = choose_port(port)
     merged = _build_settings(settings, chosen, language)
+    # 预登记（端口还没监听前先占位）: 别的 launch 看到 status=starting 会跳过这个端口。
+    entry = ports.register(
+        chosen, kind="editor", status="starting",
+        purpose=(purpose or "").strip(), owner=(owner or "").strip(),
+        tags=[t for t in (tags or []) if str(t).strip()],
+        touches=[t for t in (touches or []) if str(t).strip()],
+        notes=(notes or "").strip(),
+        extra={"engine_root": str(root)},
+    )
 
     log_dir = Path(_LOG_ROOT)
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -200,12 +208,20 @@ def launch_engine(
         )
     except OSError as e:
         log_file.close()
+        ports.remove_entry(chosen)      # 进程没起来 → 撤掉预登记，别占着端口 3 分钟
         raise LaunchError(f"cannot start engine: {e}") from e
     finally:
         # Popen 已复制句柄；父进程不需要继续持有写端。
         log_file.close()
 
     ready = _wait_ready(chosen, proc, timeout_s)
+    if entry is not None:
+        # 引擎就绪时已经自己把条目改写成 `ready`（带真实 pid / 工程 / 场景）—— 以它为准；
+        # 只有它还停在 `starting`（老引擎 / 登记失败）时才补 pid 与日志路径。
+        current = ports.read_entry(chosen) or {}
+        if current.get("status") == "starting":
+            current.update({"pid": proc.pid, "log_path": str(log_path)})
+            ports.write_entry(current)
     result = {
         "ok": bool(ready.get("ready")),
         "port": chosen,
@@ -218,8 +234,11 @@ def launch_engine(
         "settings_path": str(settings_path),
         "command": command,
         "settings": merged,
+        "ledger": ports.read_entry(chosen),
     }
     if not result["ok"]:
+        # 启动失败: 撤掉预登记（端口没被真正占住，别让后来者以为这里有实例）。
+        ports.remove_entry(chosen)
         result["error"] = ready.get("error") or "engine did not become ready"
         result["log_tail"] = _tail(log_path)
         if proc.poll() is None:
@@ -237,10 +256,16 @@ def discover_engines(start: int = PORT_RANGE_START, end: int = PORT_RANGE_END,
         result, _payload = send_raw("sim.state", {}, timeout=timeout, port=port)
         if "error" in result:
             continue
+        entry = ports.read_entry(port) or {}
         found.append({
             "port": port,
             "state": result.get("state"),
             "runtime_alive": result.get("runtime_alive"),
+            "purpose": entry.get("purpose", ""),
+            "owner": entry.get("owner", ""),
+            "project": entry.get("project", ""),
+            "project_name": entry.get("project_name", ""),
+            "summary": ports.describe(entry) if entry else "",
         })
     return found
 
@@ -254,4 +279,5 @@ __all__ = [
     "find_engine_root",
     "is_port_free",
     "launch_engine",
+    "ports",
 ]

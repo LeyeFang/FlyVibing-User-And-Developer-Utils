@@ -542,6 +542,52 @@ def test_group_linear_templates() -> None:
     check("validate linear update: no errors", not errs, str(errs[:3]))
 
 
+def test_sss_pulse_serial_prefix() -> None:
+    """sss_pulse 的串口行头（刺激器 `f,code`）—— 40 Hz 场景的关键。"""
+    print("-- sss_pulse serial_prefix --")
+    g, fu = _base()
+    r = apply_ops(g.build(), [
+        {"op": "add_group", "group_type": "sss_pulse", "alias": "sss_pulse",
+         "params": {"interval": -0.0249, "serial_prefix": "40,",
+                    "serial_baud": 115200}},
+    ])
+    check("sss_pulse with prefix ok", r["ok"], str(r["errors"]))
+    scene = r["scene"]
+    grp = scene["node_groups"]["g1"]
+    serial = [scene["nodes"][str(n)] for n in grp["members"]
+              if scene["nodes"][str(n)]["node_type"] == "SerialSend"]
+    check("one SerialSend member", len(serial) == 1, str(len(serial)))
+    props = serial[0]["props"] if serial else {}
+    check("prefix written to node", props.get("prefix") == "40,", str(props))
+    check("baud recorded 115200", props.get("baud_rate") == 115200, str(props))
+    check("params keep serial_prefix",
+          grp["params"].get("serial_prefix") == "40,", str(grp["params"]))
+    check("description carries rate",
+          "40 Hz" in str(serial[0].get("description") if serial else ""),
+          str(serial[0].get("description") if serial else ""))
+
+    # 频率与 interval 不一致 → 拒绝（固件相位基准会错，且静默）
+    bad = apply_ops(g.build(), [
+        {"op": "add_group", "group_type": "sss_pulse", "alias": "bad",
+         "params": {"interval": -0.0499, "serial_prefix": "40,"}},
+    ])
+    check("rate/interval mismatch rejected",
+          not bad["ok"] and any("declares 40 Hz" in e for e in bad["errors"]),
+          str(bad["errors"]))
+
+    # 无 prefix → 不写该 prop（现有场景不变）
+    plain = apply_ops(g.build(), [
+        {"op": "add_group", "group_type": "sss_pulse", "alias": "plain",
+         "params": {"interval": -0.0499}},
+    ])
+    grp2 = plain["scene"]["node_groups"]["g1"] if plain["ok"] else {"members": []}
+    serial2 = [plain["scene"]["nodes"][str(n)] for n in grp2["members"]
+               if plain["scene"]["nodes"][str(n)]["node_type"] == "SerialSend"]
+    check("no prefix → prop absent",
+          bool(serial2) and "prefix" not in serial2[0]["props"],
+          str(serial2[0]["props"] if serial2 else {}))
+
+
 def test_group_merge_delete() -> None:
     print("-- group merge / ungroup / delete --")
     g = GraphBuilder()
@@ -582,6 +628,7 @@ def main() -> int:
     test_group_window()
     test_group_hide_container()
     test_group_linear_templates()
+    test_sss_pulse_serial_prefix()
     test_group_merge_delete()
     print(f"\n{_RESULTS['pass']} passed, {_RESULTS['fail']} failed")
     return 0 if _RESULTS["fail"] == 0 else 1

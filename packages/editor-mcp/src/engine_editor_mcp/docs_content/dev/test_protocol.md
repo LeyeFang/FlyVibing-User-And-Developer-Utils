@@ -24,6 +24,7 @@ python Utils/Dev/test_runner.py --tier all --json     # 末行 JSON 摘要（机
 # 改动选择（推荐内层循环）：test_nodes 覆盖 + ui_map 场景合并
 python Utils/Dev/test_runner.py --affected Application/Editor/UI/panels/node_editor/panel.py
 python Utils/Dev/test_runner.py --affected Application/Core/NodeGraph/group_ops.py
+python Utils/Dev/test_runner.py --affected Test/Application/Editor/test_foo.py   # 改测试 → 跑它自己
 python Utils/Dev/test_runner.py --changed            # git status 改动文件 → affected
 
 # UI 场景回放（真实面板 + 快照 PNG）
@@ -60,7 +61,11 @@ SUMMARY: 11/12 passed in 84s | failed: test_x | tier=core | skipped=5 | runs: Te
 
 - 文件头声明：`# TIER: core`（60 行内任意位置）；未声明按文件名启发式（`e2e_*`/`test_e2e_*`→live, `*gizmo*/*grid*/*outliner*`→gui, `*live_ui*`/`*node_runtime*`→manual, `*export_game_bundle*`→heavy, 其余 core）。
 - 运行器只默认扫描 `Test/Application/**`；其他目录（Device/RHI 等）按需 `--only` + `--tier all`。
-- **内层循环用 `--affected`**：它同时读取 `test_nodes.json` 的 `covers` 与 `ui_map.json` 的 `scenarios`，不再只靠路径子串。完整 `--tier core` / `--tier gui` 只作提交前门禁。
+- **内层循环用 `--affected` / `--changed`**：同时读取 `test_nodes.json` 的 `covers` 与 `ui_map.json` 的 `scenarios`；
+  改测试文件或 `scenarios/*.py` → 直接跑它自己（不查地图）。
+- **默认不选 `manual` / `live`**（交互式 / 需要运行中的编辑器）：要跑它们显式 `--tier live` / `--tier all`。
+- `--changed` 只命中文档/配置改动 → 0 tests、退出码 0（如实打印）；显式 `--affected` 给错路径 → 退出码 2。
+- 完整 `--tier core` / `--tier gui` 只作提交前门禁，不是每次改动后的默认动作。
 
 ## 3. 输出契约（每个测试必须遵守）
 

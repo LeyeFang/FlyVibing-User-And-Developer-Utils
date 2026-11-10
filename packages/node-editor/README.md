@@ -238,22 +238,28 @@ phase0 起点调用一次（例如 `TimeTrigger(trial_phase, 0)`），不要接�
 入口是 `VarSet(trigger_val).exec_in`，出口是 `ParallelSend.exec_out`；每次 entry 发送一次。
 适合放在 cue 稳定后的 OneShot/phase0 逻辑中，不要每帧无条件调用。
 
-### sss_pulse（20 Hz SSSEP 脉冲组）
+### sss_pulse（SSSEP 脉冲组）
 
 ```json
 {"op": "add_group", "group_type": "sss_pulse", "alias": "sss_pulse",
- "params": {"interval": -0.0499, "address": 16376,
-            "serial_port": "@SSSEP-Stimulator", "serial_baud": 9600}}
+ "params": {"interval": -0.0249, "address": 16376,
+            "serial_port": "@SSSEP-Stimulator", "serial_baud": 115200,
+            "serial_prefix": "40,"}}
 ```
 
 每次 entry 做一次脉冲：`VarGet(sss_code)` 同时送 `ParallelSend` 与 `SerialSend`，
 然后 `pulse_count += 1`，最后 `SetTimer(pulse, interval)` 重装定时器。
-入口是 `ParallelSend.exec_in`，出口是 `SetTimer.exec_out`；组本身不判断 20 Hz 窗口与脉冲上限，
-这些前置条件由外层 `pulse_gate`（`count<80` 且 `trial_phase<6`）负责。
+入口是 `ParallelSend.exec_in`，出口是 `SetTimer.exec_out`；组本身不判断重复率窗口与脉冲上限，
+这些前置条件由外层 `pulse_gate`（`count<160` 且 `trial_phase<6`）负责。
 
 **`interval` 是 timer 重装值（负值），不是正的周期。** 240 Hz 逻辑线程下 `-0.0499`
-对应 12 帧 = 50 ms；若用 `-0.05`，浮点边界会落成 13 帧（约 18.5 Hz），4 s 窗口内
-实际只会发出约 76 个脉冲，而不是 80 个。换逻辑帧率时需重新校准该值。
+对应 12 帧 = 50 ms（20 Hz），`-0.0249` 对应 25 ms（40 Hz）；若用 `-0.05`，浮点边界会落成
+13 帧（约 18.5 Hz），4 s 窗口内实际只发约 76 个脉冲而不是 80 个。换逻辑帧率时需重新校准。
+
+**`serial_prefix`** 给串口行加行头：`"40,"` → `40,14\n`（节点 `props.prefix`）。
+刺激器 v2 要求每条指令自带重复率（`<f>,<code>`）；若行头是 `"<数字>,"` 形式，宏会校验
+它与 `round(1/|interval|)` 一致，不一致直接报错（否则固件相位基准错且静默）。空 → 旧行为
+（`14.0\n`）。`serial_baud` 默认已改为 `115200`（与固件一致）。
 
 ### container（外层嵌套）
 

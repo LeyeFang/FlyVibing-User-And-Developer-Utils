@@ -9,8 +9,10 @@
 用法:
   engine-editor-cli doc                     # 两级索引 (全主题)
   engine-editor-cli doc dev                 # 只索引 dev 区
-  engine-editor-cli doc outline dev/x       # 章节索引 (标题 + 预览)
-  engine-editor-cli doc show dev/x#3        # 第 3 节 (或 #标题片段)
+  engine-editor-cli doc outline dev/x       # 章节索引 (## 一级 + ### 小节 + 预览)
+  engine-editor-cli doc show dev/x#3        # 第 3 章（含其小节）
+  engine-editor-cli doc show dev/x#3.3      # 单个小节（长文档只拉这一节）
+  engine-editor-cli doc show dev/x#标题片段  # 标题匹配（H2/H3 都参与）
   engine-editor-cli doc search 关键词        # 跨主题检索
   engine-editor-cli doc tools               # 开发工具索引 (引擎仓 Utils/Dev)
   engine-editor-cli doc tool <名>           # 单工具用法 (真实 --help)
@@ -28,6 +30,8 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs_conten
 AREAS = ("dev", "extdev")
 
 _H2 = re.compile(r"^##\s+(.*)$", re.MULTILINE)
+_HEADING = re.compile(r"^(#{2,3})\s+(.*)$", re.MULTILINE)
+_NUM_PREFIX = re.compile(r"^(\d+(?:\.\d+)*)[.、]?\s*")
 _JUNK_LINE = re.compile(r"[-:|\s=]+")
 
 
@@ -129,19 +133,53 @@ def _preview(body: str, limit: int = 80) -> str:
     return ""
 
 
-def _sections(text: str) -> list[tuple[str, str]]:
-    """[("", preamble), (title, body), ...] — 按 ## 分节 (body 不含标题行)。"""
-    matches = list(_H2.finditer(text))
-    if not matches:
-        return [("", text.strip("\n"))]
-    parts: list[tuple[str, str]] = []
-    preamble = text[:matches[0].start()]
+def _sections(text: str) -> list[dict]:
+    """按 `##` / `###` 切节 → `[{level, title, number, body, has_num, index}]`。
+
+    为什么支持三层（2026-11-10）: 协议文档大量用 `### 3.3` / `### 11.1` 这类小节，
+    而此前只切 `##` —— `doc show topic#3.3` 取不到，agent 只能整章加载（约 700 行），
+    CLI 的"先索引后内容"优势在长文档上失效。
+
+    - `body` 延伸到下一个**同级或更高级**标题 → `## 3` 的正文仍含其 `### 3.x`（旧行为不变）；
+    - `number`: 标题自带编号（`3` / `3.3`）优先，否则自动补号（H3 = `<父号>.<序号>`），
+      保证 `doc show #3.3` 永远可寻址;
+    - 首个标题之前的前言作为 `level=0` 条目保留（只参与 search）。
+    """
+    marks = [(m.start(), m.end(), len(m.group(1)), m.group(2).strip())
+             for m in _HEADING.finditer(text)]
+    out: list[dict] = []
+    preamble = text[:marks[0][0]] if marks else text
     if preamble.strip():
-        parts.append(("", preamble.strip("\n")))
-    for i, m in enumerate(matches):
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        parts.append((m.group(1).strip(), text[m.end():end].strip("\n")))
-    return parts
+        out.append({"level": 0, "title": "", "number": "", "has_num": False,
+                    "body": preamble.strip("\n"), "index": 0})
+    h2_i = 0
+    h3_i = 0
+    parent = ""
+    for i, (start, end, level, title) in enumerate(marks):
+        nxt = len(text)
+        for later in marks[i + 1:]:
+            if later[2] <= level:
+                nxt = later[0]
+                break
+        num = _NUM_PREFIX.match(title)
+        explicit = num.group(1) if num else ""
+        if level == 2:
+            h2_i += 1
+            h3_i = 0
+            number = explicit or str(h2_i)
+            parent = number
+        else:
+            h3_i += 1
+            number = explicit or (f"{parent}.{h3_i}" if parent else str(h3_i))
+        out.append({"level": level, "title": title, "number": number,
+                    "has_num": bool(explicit), "body": text[end:nxt].strip("\n"),
+                    "index": i + 1})
+    return out
+
+
+def _strip_num(title: str) -> str:
+    """标题去掉自带编号（`3.3 激活策略` → `激活策略`）。"""
+    return _NUM_PREFIX.sub("", title).strip()
 
 
 # ── 对外 ────────────────────────────────────────────────────────────
@@ -161,56 +199,72 @@ def list_all(area: str = "") -> str:
         out.append(f"{topic} — {_doc_title(text, topic)}")
         out.append(f"    面向: {_purpose(text, topic)}")
         n = 0
-        for title, _body in _sections(text):
-            if title:
+        for sec in _sections(text):
+            if sec["level"] == 2:
                 n += 1
-                out.append(f"    {n}. {re.sub(r'^[0-9]+[.、] *', '', title)}")
+                out.append(f"    {n}. {_strip_num(sec['title'])}")
         out.append("")
     out.append("逐级深入: doc outline <topic> (章节索引) → doc show <topic>#<节号|标题片段>")
     return "\n".join(out)
 
 
 def outline(topic: str) -> str:
-    """章节索引 (标题 + 一行预览) — 索引层, 决定要读哪节用。"""
+    """章节索引 (标题 + 一行预览) — 索引层, 决定要读哪节用。
+
+    两级目录: `##` 一级 + `###` 缩进（带编号 → 可直接 `doc show topic#3.3`）。
+    """
     canon, path = resolve(topic)
     text = _read(path)
     lines = [f"# {canon} — {_doc_title(text, canon)}",
              f"面向: {_purpose(text, canon)}"]
     n = 0
-    for title, body in _sections(text):
-        if not title:
-            continue
-        n += 1
-        prev = _preview(body)
-        t = re.sub(r"^[0-9]+[.、] *", "", title)
-        lines.append(f"  {n}. {t}" + (f" — {prev}" if prev else ""))
+    for sec in _sections(text):
+        if sec["level"] == 2:
+            n += 1
+            prev = _preview(sec["body"])
+            lines.append(f"  {n}. {_strip_num(sec['title'])}" + (f" — {prev}" if prev else ""))
+        elif sec["level"] == 3:
+            prev = _preview(sec["body"])
+            lines.append(f"      {sec['number']}. {_strip_num(sec['title'])}"
+                         + (f" — {prev}" if prev else ""))
     lines.append("")
-    lines.append(f"读取: engine-editor-cli doc show {canon}#<序号或标题片段>")
+    lines.append(f"读取: engine-editor-cli doc show {canon}#<节号 3 / 3.3 或标题片段>")
     return "\n".join(lines)
 
 
 def show(topic: str, section: str = "") -> str:
+    """取正文。`section` 空 = 整篇；`3` = 第 3 章（含 3.x）；`3.3` = 该小节；片段 = 标题匹配。"""
     canon, path = resolve(topic)
     text = _read(path)
     section = (section or "").strip()
     if not section:
         return text.rstrip() + "\n"
-    sections = _sections(text)
-    hits = [(t, b) for t, b in sections if t]
+    secs = [s for s in _sections(text) if s["level"] in (2, 3)]
     sel = None
-    if section.isdigit():
-        idx = int(section)
-        if 1 <= idx <= len(hits):
-            sel = hits[idx - 1]
-    if sel is None:  # 标题片段匹配 (忽略大小写)
+    # ① 自带编号精确匹配（`3` / `3.3` / `11.1`）
+    want = section.lstrip("#").strip()
+    if re.fullmatch(r"\d+(?:\.\d+)*", want):
+        for sec in secs:
+            if sec["number"] == want:
+                sel = sec
+                break
+    # ② 旧用法：数字 = 第 n 个 `##`（文档编号不从 1 起 / 标题无号时仍可寻址）
+    if sel is None and want.isdigit():
+        h2 = [s for s in secs if s["level"] == 2]
+        idx = int(want)
+        if 1 <= idx <= len(h2):
+            sel = h2[idx - 1]
+    # ③ 标题片段（H2 优先，其次 H3 —— 片段同时覆盖两层的标题文本）
+    if sel is None:
         frag = section.lower()
-        for t, b in hits:
-            if frag in t.lower():
-                sel = (t, b)
+        for sec in secs:
+            if frag in sec["title"].lower():
+                sel = sec
                 break
     if sel is None:
         raise ValueError(f"{canon} 无匹配节: {section!r} (见 `doc outline {canon}`)")
-    return f"## {sel[0]}\n\n{sel[1].strip()}\n"
+    hashes = "##" if sel["level"] == 2 else "###"
+    return f"{hashes} {sel['title']}\n\n{sel['body'].strip()}\n"
 
 
 def search(keyword: str, max_hits: int = 30) -> str:
@@ -221,18 +275,17 @@ def search(keyword: str, max_hits: int = 30) -> str:
     out: list[str] = []
     for topic, path in _iter_topics():
         text = _read(path)
-        n = 0
-        for title, body in _sections(text):
-            if title:
-                n += 1
-            scope = f"{title}\n{body}"
-            if low in scope.lower():
-                label = f"{topic}#{n}" if title else topic
-                first = next((ln.strip() for ln in scope.splitlines() if low in ln.lower()), "")
-                out.append(f"{label:<52}{first[:90]}")
-                if len(out) >= max_hits:
-                    out.append("... (截断, 调整关键词缩小范围)")
-                    return "\n".join(out)
+        for sec in _sections(text):
+            scope = f"{sec['title']}\n{sec['body']}"
+            if low not in scope.lower():
+                continue
+            # 标签精确到小节（`topic#3.3`），命中就能直接 `doc show` 拉取
+            label = f"{topic}#{sec['number']}" if sec["title"] else topic
+            first = next((ln.strip() for ln in scope.splitlines() if low in ln.lower()), "")
+            out.append(f"{label:<52}{first[:90]}")
+            if len(out) >= max_hits:
+                out.append("... (截断, 调整关键词缩小范围)")
+                return "\n".join(out)
     return "\n".join(out) if out else f"无匹配: {kw!r}"
 
 

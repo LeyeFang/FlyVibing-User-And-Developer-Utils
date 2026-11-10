@@ -126,6 +126,33 @@
 - 报告: `io_owner()` → `"runtime" | "editor" | "none"`（面板状态行、`ext.device.status.io_owner`）。
 - 并口复位只在 `spd-io` 内执行 → **线程不在 = 不会复位**（这也是面板必须自己取租约的原因）。
 
+### 4.2 串口**行协议**：`SerialSend.prefix` / `suffix`（2026-11-09）
+
+`format="string"` 的载荷默认是 `str(value) + "\n"`（场景里算出的 `14.0` 就发 `14.0\n`）。
+很多下位机要的是**定长位置字段**的行（如刺激器 v2 的 `<重复率>,<条件码>` = `40,14`），
+于是加了两个可选属性：
+
+| 属性 | 默认 | 作用 |
+|---|---|---|
+| `prefix` | `""` | 行头，如 `"40,"` |
+| `suffix` | `""` | 行尾，如 `";"` |
+
+- **只在 `format="string"` 生效**；与其他 format 同用会**抛错**（不静默忽略）。
+- 任一非空时值用 `protocol.format_scalar()` 格式化 → `14` 而不是 `14.0`（整数不带 `.0`）。
+- 两者都空 = **旧行为字节级不变**（现有场景无需改动）。
+- 换行符由编码层统一追加；`prefix`/`suffix` 里**不许**出现 CR/LF（一行一次发送，防止帧被撕开）。
+- 干跑日志与实发字节用**同一份**载荷（`line='40,14\n'`），串口日志因此自解释。
+
+```python
+from Application.Functions.SerialParallelDevice.protocol import encode
+encode(14.0, "string")                      # b'14.0\n'   ← 旧行为
+encode(14.0, "string", prefix="40,")        # b'40,14\n'  ← 刺激器 v2
+encode(14,   "string", prefix="20,", suffix=";")   # b'20,14;\n'
+```
+
+> 经验规则（来自刺激器协议 v2）：**每条指令自带上下文**（频率/模式），不要靠"会话开始时设一次"的
+> stateful 约定 —— 重连、复位、换场景都会静默退回默认值。`prefix` 就是让场景能表达这件事的最小机制。
+
 ---
 
 ## 5. Runtime 集成

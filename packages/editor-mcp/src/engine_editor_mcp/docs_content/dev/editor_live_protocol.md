@@ -81,6 +81,107 @@ engine-editor-cli engines
 也可以给每个 MCP 进程配 `--port N`（`mcp.json` 的 args）连接固定实例。
 English: each agent launches its own editor with an auto-selected port; the MCP process remembers that port.
 
+### 2.2 端口台账（谁占了端口 / 在做什么 / 会碰什么 — v0.8.0）
+
+**问题**: 端口被占时后来者只看到「连不上」，不知道占用者是谁、在做什么、会不会写同一个工程；
+只能硬撞端口，冲突暴露得太晚（两个 agent 抢同一工程 / 同一个 PIE 窗口）。
+
+**做法**: 每个开发实例启动时在共享目录写一份 JSON，端口释放/进程退出时删除；读取方据此判断
+「空闲 / 已登记 / 未登记占用」，并直接读到**目的**与**涉及内容**。
+
+| 项 | 值 |
+|---|---|
+| 目录 | `<系统临时目录>/engine_editor_mcp/ports/<port>.json` |
+| 覆盖 | `FVE_PORT_LEDGER_DIR`（旧名 `MGE_PORT_LEDGER_DIR`）；`FVE_PORT_LEDGER=0` 关闭 |
+| 写入方 | 引擎 `Application/Editor/Services/PortLedger.py`（`start()` 登记、`stop()` 删除）；工具仓 `engine_editor_mcp/ports.py`（`launch` 预登记、其它开发工具可自行 `register`） |
+| 读方 | `engine-editor-cli ports`、`choose_port`（自动端口避开预占）、`instance.info` |
+
+容器格式（schema 1，两侧实现必须一致 — 守卫 `Test/Application/Editor/test_port_ledger.py`）:
+
+```json
+{
+  "schema": 1, "port": 8978, "kind": "editor", "status": "starting|ready",
+  "pid": 12345, "started_at": "2026-11-08T19:10:08+08:00", "updated_at": "...",
+  "purpose": "SetUIText PIE 验证", "owner": "agent:codebuddy",
+  "tags": ["ui", "pie"],
+  "project": "C:/.../UIShowcase/UIShowcase.myproj", "project_name": "UIShowcase",
+  "scene": "Main",
+  "touches": ["Examples/UIShowcase", "Test/_runs/set_text"],
+  "notes": "别在此实例跑全量测试",
+  "engine_root": "C:/WorkSpace/FLY/FlyVibing-Engine", "engine_version": "1.1.0",
+  "log_path": ".../engine_8978_1234_20261108_191008.log"
+}
+```
+
+字段含义（写的时候按这个口径，agent 读的时候按这个口径判断）:
+
+| 字段 | 谁关心 | 说明 |
+|---|---|---|
+| `purpose` | 后来者 | **一句话说明这个实例在做什么**；空 = 未声明（默认填「编辑器实例（工程名）」） |
+| `touches` | 后来者 | 可能被写入的目录/文件 —— 用来避免两个实例并发写同一目录 |
+| `project` / `scene` | 后来者 | 当前工程 / 激活场景（`project.open` 会刷新） |
+| `owner` | 人 | 归属：`agent:xxx` / 用户名 |
+| `pid` | 清理 | 删除守卫（**只删自己的条目**） |
+| `status` | 选端口 | `starting` = 正在启动（3 分钟内有效，`choose_port` 会跳过这个端口） |
+| `notes` | 后来者 | 自由提醒（如「别在此实例跑全量测试」） |
+
+**启动前先查（agent 推荐动作）**:
+
+```powershell
+engine-editor-cli ports                     # 只看被占/预占；stdout = JSON，stderr = 人读摘要
+engine-editor-cli ports --all               # 连空闲端口一起列
+engine-editor-cli ports --start 8977 --end 9087
+```
+
+输出里每个端口是 `free / editor / occupied / reserved / stale` 之一；`occupied` 且没有台账时
+会尽力给出进程名（`未登记进程占用（python3.14t.exe pid 105772）`）。
+
+**启动时带上目的（写进台账）**:
+
+```powershell
+engine-editor-cli launch --port auto `
+  --purpose "SetUIText PIE 验证" `
+  --owner agent:codebuddy `
+  --tag ui --tag pie `
+  --touch Examples/UIShowcase `
+  --note "别在此实例跑全量测试"
+```
+
+`launch` 在**进程启动前**就写 `status=starting`（防止两个 agent 同时抢同一个空闲端口），
+引擎就绪后把同一条目改写为 `status=ready` 并补上 `project/scene/pid/log_path`。
+
+**运行中改描述**（不想重启 / 用途变了）:
+
+```powershell
+engine-editor-cli call instance.info                     # 读：端口 / 目的 / 工程 / PIE 状态 / uptime
+engine-editor-cli call instance.describe purpose="改跑 SSVEP 相位扫描" tags=phase
+```
+
+**非编辑器的开发工具也可以登记**（web 预览、调试代理、本地 mock 服务…）：
+
+```python
+from engine_editor_mcp import ports
+ports.register(5173, kind="devtool", purpose="编辑器文档站预览",
+               owner="agent:codebuddy", touches=["docs/"])
+try:
+    serve()
+finally:
+    ports.unregister(5173, pid=os.getpid())
+```
+
+**判活规则（读者侧，不依赖 psutil）**:
+
+| 端口 | 台账 | 状态 |
+|---|---|---|
+| 在监听 | 有条目 | `editor`（`kind=editor`）或 `occupied`（其它 `kind`） |
+| 在监听 | 无条目 | `occupied`（尽力给出进程名） |
+| 空闲 | `status=starting` 且 <3 分钟 | `reserved`（有人正在启动，别抢） |
+| 空闲 | 其它 | `stale`（崩溃残留，忽略/清理） |
+
+English: every dev instance writes a small JSON next to its port (purpose, owner, project, files it may
+touch). `engine-editor-cli ports` lists them; `launch --purpose ...` registers before the process starts,
+so concurrent agents avoid the same port and the same project directory.
+
 ## 3. 协议（NDJSON + 二进制尾帧）
 
 一行一条 JSON；请求-响应一一对应：

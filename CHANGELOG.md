@@ -3,6 +3,50 @@
 All notable toolchain changes are recorded here. Package versions may move
 independently; the toolchain release version is stored in `VERSION`.
 
+## 0.8.0 — 2026-11-08
+
+> **Pinned by FlyVibing Engine 1.1.0** (2026-11-10).
+> The engine records the pair in `Utils/Dev/Installer/toolchain.lock.json`;
+> `build_installer` warns on mismatch, and
+> `Test/Application/Core/test_toolchain_lock.py` fails if the two versions drift.
+> Do not bump `VERSION` here without a matching lock-file update on the engine side.
+
+
+> Engine side: port ledger (`Application/Editor/Services/PortLedger.py`), ops `instance.info` /
+> `instance.describe`, startup flags `--purpose/--owner/--tag/--touch/--note` (78 core ops).
+
+- **Port ledger (`engine_editor_mcp/ports.py`)** — every dev instance describes the port it holds
+  in `<tmp>/engine_editor_mcp/ports/<port>.json` (schema 1, shared with the engine): `purpose`,
+  `owner`, `project`, `touches` (directories it may write), `notes`. Readers distinguish
+  `free / editor / occupied / reserved / stale` without psutil; unknown holders fall back to
+  `netstat -ano` + `tasklist` for a process name.
+- **`engine-editor-cli ports`** — new command: `--start/--end/--all/--timeout`; stdout is structured
+  JSON (full ledger entries), stderr a human summary. Run it before launching: reuse an instance
+  instead of racing for the same port/project.
+- **`launch` self-description + reservation** — `--purpose/--owner/--tag/--touch/--note`; the entry is
+  written as `status=starting` *before* the process spawns (so two agents cannot both pick the same
+  free port), then the engine rewrites it as `ready` with project/scene/pid/log path.
+  `choose_port("auto")` skips reserved ports; a port conflict now names the holder
+  (`port 8978 is in use by editor pid 1234 「PIE UI 验证」@agent:x · 工程 UIShowcase · 5m 前`).
+- **`engines`** also returns `purpose / owner / project / summary` from the ledger.
+- **MCP `engine_launch`** gained one compact `describe={...}` parameter (the lite schema budget stays
+  under 4000 chars; the CLI keeps explicit flags).
+- **Docs** — `dev/editor_live_protocol.md` §2.2 (ledger format, field semantics, staleness rules,
+  `ports` / `launch` / `instance.*` recipes, registering non-editor dev tools);
+  `skills/engine-editor/SKILL.md` now starts with `ports` before launching.
+- **Guard** — `Test/Application/Editor/test_port_ledger.py` round-trips entries between the engine and
+  the tools package (33 checks).
+- **Extension interpreter protocol (`ctx.python`)** — manifests may declare
+  `{"python": {"mode": "engine|venv|path", "path": "%EXT_DATA%/venv", "requirements": "...",
+  "probe": [...]}}`; the engine resolves it (user override → `FVE_EXT_PYTHON_<ID>` → manifest →
+  engine interpreter), probes imports in a child process and owns spawned children.
+  `extension.python id=<ext> [path=...]` reads or overrides the interpreter at runtime
+  (persisted as `editor_state/extensions.json` v2); `extension.list` exposes a `python` block.
+- **Reviewer M7 / C12** — manifest `python` structure is validated; hard-coded interpreter paths and
+  `Popen(sys.executable, ...)` now FAIL with a pointer to `ctx.python.spawn`.
+- `docs_content/extdev/extension_dev_protocol.md` §11.1: manifest reference, mode table, resolution
+  order, developer-facing "what you used to do → what to do now" table, checklist.
+
 ## 0.7.0 — 2026-11-05
 
 > Engine 1.1 companion release: runtime-UI protocol topic, `hotkeys.list`, and the

@@ -148,5 +148,23 @@ with headless_imgui() as h:
 | `Application/Functions/SerialParallelDevice/extension.py` | 端口枚举、设置持久化、快照式事件流、`close_policy="disable"` + 收尾 |
 | `Application/Functions/VirtualDevice/extension.py` | 设备族面板、watch/record、实时波形、显示滤波 |
 
+## 8. 控件怎么查（别去翻 ImGui 上游文档）
+
+面板里所有 `imgui.*` 调用都在一份按用途归类的目录里 —— 主体只收引擎真正在用的接口，
+带签名、返回形状、以及本项目踩过的约定（`##` id 作用域、`begin/end` 配对、颜色两套类型）：
+
+```powershell
+engine-editor-cli doc outline dev/imgui_api     # 18 节：文本/按钮/输入/布局/容器/表格/弹窗/…
+engine-editor-cli doc show dev/imgui_api#表格    # 只看「表格」这一节
+engine-editor-cli doc search begin_table        # 记得名字但不知道归类时
+```
+
+几条最容易踩的（完整版在 `dev/imgui_api#1`）：
+
+- `checkbox` / `selectable` / `input_*` / `drag_*` 返回 **tuple**，必须解包；
+- `begin_*` … `end_*`、`push_*` … `pop_*` 必须配对，且 `end/pop` 写在 `if` 外面；
+- `begin_disabled(True)` … `end_disabled()` 同理（条件禁用也不要跳过 begin）；
+- 给 `text_colored` 传 `ImVec4`，给 `push_style_color` 传 u32 —— 两套类型，传错只是颜色不对。
+
 相关规范全文：`extension_dev_protocol.md` §6/§7；无头 UI 细节：引擎仓库
 `Doc/Dev/ui_protocol.md`（内部协议，扩展作者不必通读）。

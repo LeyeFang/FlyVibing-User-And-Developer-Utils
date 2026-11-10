@@ -295,6 +295,15 @@ OPS: dict[str, OpSpec] = {o.name: o for o in [
     # ── extension（扩展体系: 增量扫描发现 ext.<id>.* 扩展 op） ──
     OpSpec("extension.list", "extension", "扩展列表+状态+扩展 op（ext.<id>.* 在此发现）",
            detail="扩展 op 为运行期增量注册（不在本静态表中）— 用 extension.list 获取当前清单。"),
+    OpSpec("extension.python", "extension",
+           "读/写扩展解释器（manifest `python` 协议）— 给 path 即覆盖并立即生效",
+           (Param("id", "str", True, "扩展 id（如 device）"),
+            Param("path", "str", False, "解释器路径；空串 = 清除覆盖（回落 env → manifest → 引擎）"),
+            Param("probe", "bool", False, "只读时是否做 import 自检（默认 true）")),
+           detail="返回 `{id, loaded, override, python:{mode, source, executable, exists, "
+                  "declared, probe, problems, children}}`。覆盖写入 "
+                  "`%APPDATA%/FlyVibingEngine/editor_state/extensions.json`（version 2）。",
+           example="id=device   # 只读\nid=device path=C:/envs/eeg/Scripts/python.exe   # 覆盖"),
     OpSpec("extension.enable", "extension", "启用扩展（等同 Extensions 菜单勾选; 加载 on_load/on_enable）",
            (Param("id", "str", True, "扩展 id（如 sigproc）"),)),
     OpSpec("extension.disable", "extension", "停用扩展（on_disable/on_unload + 注销其全部 ops）",
@@ -322,6 +331,22 @@ OPS: dict[str, OpSpec] = {o.name: o for o in [
            (Param("target", "enum", True, ""), Param("generation", "int", True, "")), internal=True),
     # ── editor ──
     OpSpec("editor.quit", "editor", "请求关闭编辑器（下一帧正常退出）"),
+    # ── instance（实例自述 / 端口台账）──
+    OpSpec("instance.info", "editor",
+           "本实例自述（端口 / 目的 / 归属 / 工程 / 场景 / PIE 状态）— 启动前先查，能复用就不另起",
+           detail="静态部分来自端口台账（`<tmp>/engine_editor_mcp/ports/<port>.json`），"
+                  "实时部分是本帧状态（state / runtime_alive / uptime_s）。"
+                  "另一个 agent 据此判断会不会撞同一工程，避免两个实例抢同一个 PIE 窗口。",
+           example=""),
+    OpSpec("instance.describe", "editor",
+           "改写本实例的对外描述（purpose / owner / tags / touches / notes）— 写台账，立即对后来者可见",
+           (Param("purpose", "str", False, "这一实例在做的事（如：SetUIText PIE 验证）"),
+            Param("owner", "str", False, "归属（agent:xxx / 人名）"),
+            Param("tags", "json", False, "标签（列表或逗号串）"),
+            Param("touches", "json", False, "这一实例可能写入的目录/文件（列表或逗号串）"),
+            Param("notes", "str", False, "给后来者的提醒（如：别在此实例跑全量测试）")),
+           detail="用于「这个实例接下来要做什么」—— 启动时没写描述、或用途变了时补写。",
+           example='purpose="SetUIText PIE 验证" owner=agent:codebuddy tags="ui,pie"'),
 ]}
 
 # 旧 MCP 工具名 → op 别名（engine_call / CLI 兼容老提示词与文档）
@@ -382,6 +407,7 @@ CLI_COMMANDS: tuple[tuple[str, str], ...] = (
     ("probe [editor|pie] --points x:y;...", "像素采样→RGBA（顶左坐标；与 capture 同一帧）"),
     ("launch", "启动引擎并等待握手（--port auto 多实例）"),
     ("engines", "扫描端口频段，列出可响应的引擎"),
+    ("ports", "端口台账: 谁占了端口 / 目的 / 归属 / 涉及工程（启动前先看）"),
     ("doc", "内置文档（索引→章节→按节读取）"),
     ("setup", "向工作区安装 skill + mcp.json"),
 )
@@ -402,6 +428,7 @@ TOPIC_HELP = {
         "engine-editor-cli（终端模式，零常驻上下文成本 — 首选）:\n"
         "  engine-editor-cli launch [--port auto] [--language en|zh] [--set k=v]  # 启动引擎 + 握手\n"
         "  engine-editor-cli engines                    # 扫描 8977..9076，列出运行中的编辑器\n"
+        "  engine-editor-cli ports                      # 端口台账（谁占了 / 在做什么 / 会碰哪些目录）\n"
         "  engine-editor-cli --port 8977 call ...       # 指定实例（全局 --port 放子命令前）\n"
         "  engine-editor-cli ops                        # op 目录（尾部也列非 op 子命令）\n"
         "  engine-editor-cli help <op|主题>             # 单 op 详情 / 主题（probe、exitcodes …）\n"

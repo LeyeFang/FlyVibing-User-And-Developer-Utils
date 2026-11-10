@@ -630,6 +630,19 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 
 - 示例: `engine-editor-cli call extension.list`
 
+### `extension.python`
+
+读/写扩展解释器（manifest `python` 协议）— 给 path 即覆盖并立即生效
+
+返回 `{id, loaded, override, python:{mode, source, executable, exists, declared, probe, problems, children}}`。覆盖写入 `%APPDATA%/FlyVibingEngine/editor_state/extensions.json`（version 2）。
+
+- `id` (str, 必填) — 扩展 id（如 device）
+- `path` (str, 可选) — 解释器路径；空串 = 清除覆盖（回落 env → manifest → 引擎）
+- `probe` (bool, 可选) — 只读时是否做 import 自检（默认 true）
+
+- 示例: `engine-editor-cli call extension.python id=device   # 只读
+id=device path=C:/envs/eeg/Scripts/python.exe   # 覆盖`
+
 ### `extension.enable`
 
 启用扩展（等同 Extensions 菜单勾选; 加载 on_load/on_enable）
@@ -709,3 +722,25 @@ Node Editor 额外返回 view 诊断: canvas_w/zoom/mouse/selected_nodes/box/nod
 请求关闭编辑器（下一帧正常退出）
 
 - 示例: `engine-editor-cli call editor.quit`
+
+### `instance.info`
+
+本实例自述（端口 / 目的 / 归属 / 工程 / 场景 / PIE 状态）— 启动前先查，能复用就不另起
+
+静态部分来自端口台账（`<tmp>/engine_editor_mcp/ports/<port>.json`），实时部分是本帧状态（state / runtime_alive / uptime_s）。另一个 agent 据此判断会不会撞同一工程，避免两个实例抢同一个 PIE 窗口。
+
+- 示例: `engine-editor-cli call instance.info`
+
+### `instance.describe`
+
+改写本实例的对外描述（purpose / owner / tags / touches / notes）— 写台账，立即对后来者可见
+
+用于「这个实例接下来要做什么」—— 启动时没写描述、或用途变了时补写。
+
+- `purpose` (str, 可选) — 这一实例在做的事（如：SetUIText PIE 验证）
+- `owner` (str, 可选) — 归属（agent:xxx / 人名）
+- `tags` (json, 可选) — 标签（列表或逗号串）
+- `touches` (json, 可选) — 这一实例可能写入的目录/文件（列表或逗号串）
+- `notes` (str, 可选) — 给后来者的提醒（如：别在此实例跑全量测试）
+
+- 示例: `engine-editor-cli call instance.describe purpose="SetUIText PIE 验证" owner=agent:codebuddy tags="ui,pie"`

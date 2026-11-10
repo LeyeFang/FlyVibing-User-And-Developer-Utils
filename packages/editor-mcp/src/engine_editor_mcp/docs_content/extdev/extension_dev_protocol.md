@@ -75,10 +75,14 @@ def create_extension() -> MyThingExtension:
 启用与验证（编辑器运行中）：
 
 ```
-engine-editor-cli call extension.enable id=mything     # 或 Extensions 菜单勾选
+engine-editor-cli call extension.enable id=mything     # 或 Settings ▸ Extensions 勾选（§3.3）
 engine-editor-cli call extension.list                  # 应出现 mything + ext.mything.info
 engine-editor-cli call ext.mything.info                # 扩展 op 直接可调（ext.* 透传）
 ```
+
+> 开发期挂在 `Application/Functions/` 的扩展默认是 `local`（**opt-in**，需勾一次，见 §3.3）；
+> 只有 allowlist 内的 `builtin` 才恒激活，`extension.enable` 对它只是兜底。
+> 没有面板的扩展不会出现在主菜单栏 —— 管理在 Settings ▸ Extensions。
 
 ## 3. 目录与命名规范
 
@@ -136,6 +140,50 @@ engine-editor-cli call ext.mything.info                # 扩展 op 直接可调�
 （含面板 X 触发的停用）在画布上还有该扩展节点时会返回
 `unresolved_nodes` + 警告，并在控制台点名。
 
+### 3.3 激活策略与入口分工（2026-11-10 起，改变了默认行为）
+
+**内置由 allowlist 定义，不由目录定义；面板决定菜单。**
+
+| 扩展位置 | `scope` | 激活 | 谁管启停 |
+|---|---|---|---|
+| `<EngineRoot>/Application/Functions/**` **且** ∈ `official_extensions.json` allowlist（= `.gitignore` 白名单） | `builtin` | **恒激活**（`always_on=true`，不可停用） | 无人管 —— 装好即用 |
+| `<EngineRoot>/Application/Functions/**` **但不在** allowlist（本地/社区夹具，如 Gtec、mi-sssep） | `local` | 状态文件 opt-in（默认停用） | **Settings ▸ Extensions** 页勾选 |
+| `<APPDATA>/FlyVibingEngine/extensions/**`（用户装） | `user` | 状态文件 opt-in（默认停用） | **Settings ▸ Extensions** 页勾选 |
+
+> **为什么不是「在 Functions 里就算内置」**：`Application/Functions/` 整个目录在 `.gitignore` 里，
+> 只有放行行 `!Application/Functions/<Dir>/` 覆盖到的目录才随仓库/安装包分发。本地夹具
+> （社区插件的开发副本）也常驻该目录，它们不进安装包、也不该被锁成不可停用。
+> 判定唯一实现：`ExtensionManager.scope_of()`；两处白名单的镜像关系由
+> `Test/Application/Extensions/test_extension_builtin_scope.py` 守卫（漂移即红）。
+
+安全模式：`FVE_EXTENSIONS_BUNDLED=off`（旧 `MGE_` 前缀同样生效）→ builtin 也回到 opt-in，
+用于排查"某个内置扩展把编辑器搞崩了"。此时 `extension.list` 每个 builtin 项 `always_on=false`。
+
+**两个入口各管一半，别再混着找：**
+
+| 入口 | 显示什么 | 用途 |
+|---|---|---|
+| 主菜单栏 **Extensions** | **只有 `has_ui` 的扩展**（`capabilities` 含 `ui`，或确实注册了面板） | 叫回面板；非 builtin 扩展仍带勾选框 = 启停 |
+| **Settings ▸ Extensions**（`order=20`） | **全部扩展**（含无面板的后台扩展、broken、planned） | 唯一的管理面：启停、诊断（目录/scope/capabilities/解释器/示例根/已注册 op/错误原因） |
+
+> 无面板扩展（`ops` / `nodes` / `examples` / `device` 类）**不会**出现在主菜单栏 —— 这是有意的，
+> 否则菜单会被一堆"点了没反应"的条目填满。它们的开关在设置页。
+
+`has_ui` 的两条判据（任一成立）：manifest `capabilities` 声明 `ui`（**意图** — 未启用时菜单也能
+留下入口）；或当前确实注册了 `ExtensionPanel` 窗口（**事实** — 兜住"没声明但用了 `ctx.ui`"）。
+`extension.list` 每项都回 `scope` / `always_on` / `has_ui`，agent 用这三个字段判断该去哪儿找。
+
+**对作者的影响（必读）**
+
+1. 开发期把扩展挂在 `Application/Functions/` → 它是 `local`：**默认停用**，在
+   Settings ▸ Extensions 勾一下即可（`extension.enable id=<你的 id>` 等价，会持久化）。
+   只有 allowlist 内的才 `always_on`、`extension.disable` 会报错。
+2. **示例（`Examples/`）跟着扩展的启用状态走**：`local` / `user` 扩展停用时，它的示例
+   不会出现在 `File ▸ Open Example`。为避免"注入了却没出现"的误判，菜单在底部会显示
+   灰字 `"<扩展> — N 个示例（扩展未启用）"`，点一下就地启用。
+3. 菜单里"看不到我的扩展"现在有明确答案：**没面板就不在菜单里**，去 Settings ▸ Extensions 找。
+4. `extension.enable id=<builtin>` 仍然可用，但语义变成"确保已装载 + 显示它的面板"，不写状态文件。
+
 ## 4. manifest 参考（extension.json）
 
 | 字段 | 必填 | 说明 |
@@ -143,24 +191,30 @@ engine-editor-cli call ext.mything.info                # 扩展 op 直接可调�
 | `id` | ✅ | 唯一标识; 命名空间前缀; 全局不可重复（重复 → 后加载者 broken） |
 | `name` / `version` | ✅ | 显示名 / semver |
 | `api_version` | ✅ | 当前仅支持 `"1"`（或 `1.x`）; 不匹配 → broken（菜单灰显原因） |
-| `maturity` | ✅ | `planned` / `skeleton` / `partial` / `stable` — 菜单与 `extension.list` 展示 |
+| `maturity` | ✅ | `planned` / `skeleton` / `partial` / `stable` — 设置页与 `extension.list` 展示 |
 | `entry` | 有代码则必填 | `"extension.py:create_extension"` 形式; **文件缺失 → broken**; 省略 = 仅计划（不可启用） |
-| `description` | 建议 | 菜单 tooltip / 文档 |
+| `description` | 建议 | 设置页 / 菜单 tooltip / 文档 |
 | `provider` | 可选 | 扩展自带的 Example/节点默认签名（`@ACME`）；缺省 `@<id>`。单个 `.myproj` / 节点仍可用自身 `provider`/`signature` 覆盖 |
 | `capabilities` | 建议 | 声明所需能力。**合法值集**（与审查器 M5 同源）: `ops` / `ui` / `nodes` / `threads` / `jobs` / `settings` / `device` / `graph` / `examples`。语义见 §6 能力表；`requires` 暂仅解析展示（依赖拓扑 M3） |
 | `export` | 可选 | 默认 `true`。仅控制 **游戏导出**：`false` = 该扩展目录不进入 `File ▸ Export` 游戏层（即使场景用到其节点也会告警并排除）；**不影响安装包**——安装包按 `Application/Functions/official_extensions.json` mainline allowlist 分发。导出清单 `export_excluded` 会记录路径 |
+| `python` | 可选 | 解释器协议（§11.1）：`"engine"` 简写，或 `{mode, path, requirements, probe}`。缺省 = 引擎解释器；依赖冲突时声明 `venv` / `path` |
 
-**状态语义**（`extension.list` / 菜单）: `planned`（无 entry）· `disabled`（可装载未启用）·
-`enabled`（已装载）· `broken`（manifest/加载错误 — 原因在 `error` 字段与 tooltip）。
+**状态语义**（`extension.list` / 设置页）: `planned`（无 entry）· `disabled`（可装载未启用）·
+`enabled`（已装载）· `broken`（manifest/加载错误 — 原因在 `error` 字段）。
+另有三个入口相关字段：`scope`（`builtin` / `local` / `user`）、`always_on`（仅 builtin 恒激活，§3.3）、
+`has_ui`（决定是否出现在主菜单栏 Extensions）。
 
 ## 5. 生命周期契约
 
 ```
 enable:  构造实例 → on_load(ctx) → on_enable()
 disable: on_disable() → on_unload() → 自动注销该扩展全部 ext.<id>.* ops
-rescan:  已装载者全部 unload 后重新扫描（Extensions 菜单 ▸ Rescan）
+rescan:  已装载者全部 unload 后重新扫描（Settings ▸ Extensions ▸ Rescan）
 关闭:    ExtensionManager.unload_all()（不改变持久化启用状态）
 ```
+
+> `builtin` 扩展（allowlist 内，随引擎/安装包分发）没有 `disable` 这一支 —— `disable` 直接抛错（§3.3）。
+> `local`（Functions 下的非白名单夹具）与 `user` 扩展可以正常停用。
 
 约定：
 1. `on_load` 只做**注册类**工作（ops/窗口/节点）; 重初始化放 `on_enable`。
@@ -185,6 +239,7 @@ rescan:  已装载者全部 unload 后重新扫描（Extensions 菜单 ▸ Resca
 | `ctx.threads / ctx.jobs / ctx.bus` | `[M2]` | 受管线程 / 后台任务 / 数据总线 |
 | `ctx.ui.post(fn)` | `[M1]` | 后台线程 → 渲染线程帧安全点 |
 | `device`（能力键, **非** ctx 对象） | ✅ M0 | 语义 = **允许导入设备门面** `Application.Functions.VirtualDevice`（在 C6 白名单内）；**不提供 `ctx.device`**（不扩大 API 面）; 三模式（sim/device/virtual）与无硬件验收通道见 `Doc/Dev/device_io_protocol.md` §7 |
+| `ctx.python` | ✅ 2026-11-09 | **解释器协议** — `.executable` / `.env(extra)` / `.probe(module)` / `.spawn(module, args, ...)` / `.explain()` / `.install_hint()`。总是注入（默认引擎解释器）；manifest `python` 声明自有 venv/exe；`spawn` 拉起的子进程由宿主在 disable/unload 时统一回收（§11.1） |
 | `ctx.graph`（能力键 `graph`） | ✅ M1 (2026-10-29 扩展) | **受限图访问** — `nodes()` / `owned_nodes()` / `find(...)` / `find_type(...)` 读取；`add_node` / `update_node` / `set_props` / `replace_props` / `remove_node` / `add_link` / `remove_link` 写入；`request_redraw()` 触发编辑器重绘。默认只允许创建/改写/删除本扩展 owner 的节点，连线至少一端属于本扩展。**不 import 编辑器层**（`ExtensionGraph` 转发到编辑器单一入口）。未声明 `graph` 时 `ctx.graph is None` |
 | `ctx.examples`（能力键 `examples`） | ✅ M1 (2026-10-30) | **扩展示例根目录** — `register(root, provider=None)` / `unregister(root)` / `roots()`。扩展自带 `<extension_dir>/Examples/` 在 enable 时由宿主自动登记（无需 capability）；声明 `examples` 后才注入 `ctx.examples`，用于追加额外根目录。宿主只读、不复制；disable/unload 时自动移除本扩展全部根目录。未声明 `examples` 时 `ctx.examples is None`；`.myproj.provider` 优先于 manifest `provider`，缺省 `@<id>` |
 > 能力键 `device` 与其它行的区别: 前几行是"宿主注入的 ctx 能力对象", `device` 是**导入许可声明**
@@ -327,7 +382,7 @@ SettingsPanel.register_page(SettingsPage(
 
 **窗口生命周期完备性（2026-10-11 — 面板开关同步闭环）**:
 
-背景: 面板自身关闭（X）与其它状态（Extensions 菜单勾选）曾出现不同步 —— 根因是
+背景: 面板自身关闭（X）与其它状态（设置页勾选）曾出现不同步 —— 根因是
 **“启用状态”与“窗口可见性”是两条正交的线, 无人负责其联动**。职责划分: 联动策略由
 **扩展作者**决定（宿主不可能预知每个扩展的面板语义）, 宿主提供机制, 三重保障 =
 本文档 + 静态审查器 + Python 语言层强制。
@@ -335,7 +390,7 @@ SettingsPanel.register_page(SettingsPage(
 | 状态 | 语义 | 责任 |
 |---|---|---|
 | 注册 | `register_window` 成功（装配期） | 扩展（经 ctx.ui） |
-| 可见/隐藏 | 窗口 X / 菜单勾选 / 程序化设置 | **扩展必须声明联动策略（close_policy）** |
+| 可见/隐藏 | 窗口 X / View 菜单 / 程序化设置 | **扩展必须声明联动策略（close_policy）** |
 | 注销 | disable/卸载 → 宿主 purge | 宿主（保险丝） |
 
 **close_policy（注册时声明, 三选一）**:
@@ -343,8 +398,11 @@ SettingsPanel.register_page(SettingsPage(
 | 策略 | 窗口 X 的语义 | 适用场景 |
 |---|---|---|
 | `"hide"`（默认） | 仅隐藏; 扩展继续运行（再次启用会重置可见 — 宿主保证） | 可选视图侧窗 |
-| `"disable"` | **关闭 = 请求停用扩展 → Extensions 菜单勾选同步消失（闭环）** | 单主面板扩展（面板即扩展界面本体） |
+| `"disable"` | **关闭 = 请求停用扩展 → 设置页勾选同步消失（闭环）** | 单主面板扩展（面板即扩展界面本体） |
 | `"custom"` | 仅派发事件, 由扩展全权决策 | 复杂多窗联动 |
+
+> builtin 扩展（allowlist 内）不可停用，`close_policy="disable"` 对它退化为
+> `"hide"`（窗口 X 只隐藏）；需要「关掉就不再见」的语义请把扩展装到用户目录。
 
 **on_ui_event(event, name) 事件契约**:
 
@@ -435,7 +493,7 @@ def register() -> dict:
 |---|---|
 | 发现 | `extension.list`（==菜单列表）→ `extensions[].ops` + `extensions[].nodes` + `extension_ops{}`（owner/summary） |
 | 节点类型 | `graph.types`（含扩展 pack）→ type/label/category/owner/pins/fields |
-| 启停 | `extension.enable / extension.disable`（等同菜单勾选; 持久化） |
+| 启停 | `extension.enable / extension.disable`（等同 Settings ▸ Extensions 勾选; 持久化；builtin 不可停用） |
 | 调用 | 任意通道直接发 `ext.<id>.<op>`: CLI `call`（ext.* 透传, 无需静态注册）/ `engine_call` / exec `engine.ok` |
 | 文档 | 扩展 op 的 summary 在 `extension.list` 中; 富有文档的扩展建议带 README 路径 |
 
@@ -468,6 +526,74 @@ def register() -> dict:
 - 可写状态一律 `ctx.data_dir`（默认 `%APPDATA%/FlyVibingEngine/extensions_data/<id>/`，随启用状态独立；测试/部署可用 `FVE_EXTENSIONS_DATA` 或旧 `MGE_EXTENSIONS_DATA` 覆盖）。
 - `[M1]` `ctx.settings(schema)` 落地后: schema 自动生成设置 UI + 持久化, 禁止自建配置文件到其它位置。
 
+### 11.1 Python 解释器与依赖（2026-11-09 — `ctx.python`）
+
+**先说结论**：扩展的第三方依赖**不要装进引擎 venv**，也不要在代码里写死
+`C:\...\venv\Scripts\python.exe`。在 manifest 声明，宿主负责解析、托管、回收。
+
+```json
+"python": {
+  "mode": "engine",
+  "path": "%EXT_DATA%/venv",
+  "requirements": "requirements.txt",
+  "probe": ["serial", "numpy"]
+}
+```
+
+| mode | 什么时候用 | 行为 |
+|---|---|---|
+| `engine`（默认） | 纯 Python / 与引擎同版本的依赖（pyserial、numpy…） | 用编辑器自己的解释器；零配置 |
+| `venv` | 依赖与引擎冲突，或需要编译轮子（设备 SDK） | `path` 指向扩展自己的 venv **目录**（也接受 exe）；推荐 `%EXT_DATA%/venv` |
+| `path` | 系统 Python / conda / 用户指定 | `path` 直接指向 exe |
+
+`path` 支持 `%EXT_DIR%` / `%EXT_DATA%` / `%ENGINE_ROOT%` 变量，**禁止写死机器路径**。
+
+**解析优先级**（`ctx.python.explain()` 会说明实际来源）：
+
+```
+FVE_EXT_PYTHON_<ID>（旧 MGE_EXT_PYTHON_<ID>）→ manifest python.path → 引擎解释器
+```
+
+**运行期覆盖（不用重启）**
+
+```powershell
+engine-editor-cli call extension.python id=device          # 只读：mode/source/executable/probe/problems
+engine-editor-cli call extension.python id=device path="C:/envs/eeg/Scripts/python.exe"
+engine-editor-cli call extension.python id=device path=""   # 清除，回落 env → manifest → 引擎
+```
+
+覆盖写进 `%APPDATA%/FlyVibingEngine/editor_state/extensions.json`（`version: 2`，`python` 段）；
+已装载的扩展立即生效（之后的 `probe`/`spawn` 用新解释器，已拉起的子进程仍由 `close()` 回收）。
+
+**`ctx.python` 门面**
+
+| 成员 | 用途 |
+|---|---|
+| `.executable` / `.source` | 解析结果 / 来源（`engine` / `manifest` / `env`） |
+| `.env(extra=None)` | 子进程环境（`PYTHONPATH` = 扩展目录 + 引擎根；`PYTHONNOUSERSITE=1`） |
+| `.probe("serial")` | 子进程 `import` 自检 → `(ok, detail)`；结果缓存 |
+| `.spawn(module="pkg.service", args=["--port", "0"])` | 拉起子进程 → `{pid, cmd, log}`；**disable/unload 时宿主统一 terminate/kill** |
+| `.explain()` | `{mode, source, executable, exists, probe, problems, children}` — 直接贴进错误信息 |
+| `.install_hint()` | 缺依赖时的可复制命令（`"<exe>" -m pip install -r "<requirements>"`；不自动执行） |
+
+**开发者视角：你原来会怎么做，现在该怎么做**
+
+| 你原本的打算 | 会发生什么 | 现在 |
+|---|---|---|
+| `pip install` 到引擎 venv | 本机能跑，重装/升级/换机即失效，且可能与引擎依赖打架 | 声明 `venv` + `%EXT_DATA%/venv`；或 `engine` 模式 + `probe` 声明 |
+| 自己 `subprocess.Popen(sys.executable, ...)` | 拿到的是编辑器环境；缺依赖时才在子进程日志里炸；退出不回收 | `ctx.python.spawn(module=..., args=[...])`：统一日志目录、卸载回收、环境一致 |
+| 写死 `C:\Users\me\venv\Scripts\python.exe` | 换机器/换盘符就断，报错不可读 | manifest `path` 用变量；用户可用 `FVE_EXT_PYTHON_<ID>` 临时覆盖 |
+| 让用户先手动起服务 | 每次实验前要记得起，忘了就是"设备打不开" | 仍支持手动端点；自动拉起用 `spawn`，失败信息带 `explain()` 与启动命令 |
+| 缺依赖时 `except Exception: return []` | 用户只看到"没有设备/没有波形" | `probe()` + 一条带安装命令的日志（设备类扩展的 `ext.<id>.status` 也回传 `python` 块） |
+
+**检查清单**
+
+1. manifest 声明了 `python`（至少 `{"mode": "engine", "probe": [...]}`）；
+2. 不在模块顶层 spawn / 不自己 `Popen`；
+3. 依赖缺失走 `probe` → 日志/状态里给出 `install_hint()`；
+4. 卸载不需要自己杀子进程（宿主回收；扩展自己 Popen 的仍需自己管）；
+5. `extension.list` 的 `python` 块能看到解析结果（`executable` / `source` / `problems`）。
+
 ## 12. 测试规范（扩展必带自测）
 
 1. 每个扩展自带 `test_<id>_extension.py`（放 `Test/Application/Extensions/` 或扩展目录的
@@ -482,8 +608,9 @@ def register() -> dict:
    - `test_editor_mcp_package` 核心计数 — 扩展不改变核心计数;
    - `test_imgui_stack_pairing` 窗口栈配对（主应用 + 扩展示例同源扫描）;
    - 扩展 op 出现/消失只影响 `extension.list`。
-5. **实机自动化**: 用 `extension.enable` / `extension.disable` op 驱动启停（等同菜单勾选语义）——
-   菜单弹出层没有程序化点击入口, 不必为此写鼠标脚本。
+5. **实机自动化**: 用 `extension.enable` / `extension.disable` op 驱动启停（等同设置页勾选语义）——
+   菜单/设置页没有程序化点击入口, 不必为此写鼠标脚本（`extension.list` 每项的
+   `enabled` / `status` 就是断言点）。
 6. **无头 GUI 测试的唯一入口**（2026-10-12 — 实测踩坑）: 需要裸 imgui 上下文时**必须**用
    `flyvibing_extension_kit.imgui_headless.headless_imgui()`（自动禁用布局持久化）:
    ```python
@@ -500,7 +627,8 @@ def register() -> dict:
 
 | 项 | 状态 |
 |---|---|
-| 发现/校验/启停/持久化/隔离 · ops 增量扫描 · Extensions 菜单 · `extension.*` ops | ✅ M0 (2026-10-11) |
+| 发现/校验/启停/持久化/隔离 · ops 增量扫描 · `extension.*` ops | ✅ M0 (2026-10-11) |
+| **激活策略 + 入口分工**（builtin = allowlist 恒激活；Functions 下非白名单 = `local` 仍 opt-in；主菜单栏只列 `has_ui`；管理面收敛到 Settings ▸ Extensions；`FVE_EXTENSIONS_BUNDLED=off` 安全模式） | ✅ M1 (2026-11-10) |
 | `ctx.ui.register_window` + ExtensionUI 桥 + **官方示例扩展**（device 监视面板 — 含真实串口闭环与侵入风险审查） | ✅ M1 部分 (2026-10-11) |
 | **窗口生命周期完备性**（close_policy / on_ui_event / `UIExtensionBase` 语言层强制 / 挂起停用队列）+ ExtensionKit 审查器 v0 | ✅ M1 (2026-10-11) |
 | **VirtualDevice 波形监视面板范例**（Gtec 设计语言干净重写: watch/record + 示波器 + 显示滤波 + `ext.virtual.*` 九件套 + 厂商复制指南） | ✅ M1 (2026-10-16) |
@@ -522,6 +650,8 @@ def register() -> dict:
 - [ ] （示例扩展）自带 `<extension_dir>/Examples/<Name>/` 可被 `File ▸ Open Example`
       发现；不要把示例复制到用户目录；需要额外根目录时声明 `capabilities:["examples"]`
       并用 `ctx.examples.register`，确认 disable/unload 后条目消失（§6.2）
+- [ ] `extension.list` 四项入口字段符合预期：`scope`（builtin/local/user）、`always_on`
+（仅 allowlist 内置应为 true）、`has_ui`（有无面板 —— 决定是否进主菜单栏，§3.3）、`enabled`
 - [ ] `extension.enable` → `extension.list` 显示 enabled + ops 齐全 → 逐 op 实调通过
 - [ ] 自带测试按 `test_protocol.md` 契约全绿; 未破坏核心计数守卫
 - [ ] `TODO.md` 状态更新（maturity 与清单勾选）

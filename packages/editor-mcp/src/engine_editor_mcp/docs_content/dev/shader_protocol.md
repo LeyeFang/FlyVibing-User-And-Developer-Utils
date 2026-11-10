@@ -40,28 +40,31 @@ Resource/Shaders/Builtin/
 1. **注册**：`ResourceManager.DEFAULT_SHADER_NAME` / `DEFAULT_SHADER_FILE`（zip 顺序 → `shader_id` 1..N）。
    新增内置 shader = 两个列表各加一项；**顺序即 id，插队会移位所有后续 id**。
 2. **解析**：`Resource/_resource_utils.py: parse_shader_files()` — 正则提取 `uniform <type> <name>`
-   （含数组/初始化式）→ `uniforms_name_type`（名 → GLSL 类型）。`material_mat4` 等引擎注入项
-   也在此表内。
+   （含数组/初始化式）→ `uniforms_name_type`（名 → GLSL 类型），**同时**读取声明旁的 `//!` 注解
+   → `uniform_specs`（名 → `UniformSpec`，见 §6.1）。返回值是 6 元组，最后一项是 spec 表。
 3. **保留 uniform 黑名单**（`_RESERVED_UNIFORMS`，同文件）：
-   `uAmbient / uCameraPos / uLightCount / uLightDir / uLightColor /`
+   `uAmbient / uCameraPos / uLightCount / uLightPos / uLightDir / uLightColor /`
    `uPointCount / uPointPos / uPointColor / uPointRange`
    —— 由渲染管线**每帧统一注入**，解析时**直接剔除**，不进材质、UI 不可见、逐实体上传时跳过
    （`OpenGLEntities._MATERIAL_SKIP_UNIFORMS`）。新增帧级注入项时必须两处同步。
+4. **归属来源**：除黑名单外，`//! owner=engine|runtime` 也能把 uniform 排除出材质
+   （`time` 即走这条 —— 不进 `.mat`、GUI 只读、逐实体上传时二次跳过）。
 
-### 2.3 材质系统支持的 uniform 类型（重要边界）
+### 2.3 材质系统支持的 uniform 类型
 
-`Material.__init__` / `set_new_shader` 按类型生成默认值，**只覆盖**：
+**默认值不再按类型硬编码** —— 以 shader 的 `//! default=` 为准（§6.1），没写注解时才回落下表
+（= 2026-11 之前的行为，老 shader 一行不改也能跑）：
 
-| GLSL 类型 | 默认值 | UI 控件 |
+| GLSL 类型 | 无注解时的默认值 | UI 控件（无注解） |
 |---|---|---|
 | `mat4` | 全 0 | 只读文本 |
 | `vec4` | (1,1,1,1) | drag_float4 |
 | `vec3` | (1,1,1) | drag_float3 |
 | `float` / `double` | 0 | drag_float |
-| `int` / `sampler2D` / 数组 | **不支持 — 静默跳过**（不进 `uniforms_data`） | — |
+| `int` | 0 | drag_int（注解 `ui: enum` 才是下拉） |
+| `sampler2D` / 数组 | **不进材质**（采样器由 `texture_id_list` 管、数组只读展示） | — |
 
-> 需要 int / 数组 uniform？只有两条路：渲染器帧级注入（如 `uLightDir[4]`），
-> 或扩充本表（同步 UI/序列化/上传三处）。
+> 想让某个参数有正确的控件/范围/默认值，**写注解**（§6.1），不要扩充本表。
 
 ---
 
@@ -106,6 +109,7 @@ ENTITY_POS_UV_NORMAL  (stride 32B):  loc0 → vec3 aPos (12B)
 | 材质通用 | `uColor` 等 | vec4… | 材质 `uniforms_data` | 逐实体 |
 | 材质光照（Lighting 专用） | `uShininess` · `uSpecularStrength` · `uDiffuseStrength` · `uAmbientStrength` (float) · `uSpecularModel` (int) | — | 材质 | 逐实体 |
 | 材质自定义 | 任意（如 `uShininess`） | 见 §2.3 | 材质 | 逐实体 |
+| **运行期注入** | 声明 `//! owner=runtime` 者（当前：SSVEP `time`） | float | `OpenGLEntities._inject_runtime`（值 = 引擎 elapsed 秒） | 每 program 每帧**一次** |
 | **渲染器注入** | `uAmbient` (vec3) · `uCameraPos` (vec3) · `uLightCount` (int) · **`uLightPos[4]` (vec3)** · `uLightDir[4]` (vec3) · `uLightColor[4]` (vec3) · `uPointCount` (int) · `uPointPos[4]` (vec3) · `uPointColor[4]` (vec3) · `uPointRange[4]` (float) | — | `OpenGLEntities._inject_lighting` | 每 program 每帧**一次** |
 
 规则：
@@ -116,28 +120,109 @@ ENTITY_POS_UV_NORMAL  (stride 32B):  loc0 → vec3 aPos (12B)
    `uLightPos` = 面光源**世界位置**（参与发光面半空间判定，见 §7.2）；
    点光组：`uPointPos` = 世界位置、`uPointColor` = 颜色 × 强度、`uPointRange` = 衰减半径。
 3. 逐实体材质上传跳过黑名单（§2.2），材质若**历史遗留**同名键也不会覆盖注入值（双保险）。
+   `owner=runtime` 的名字在这条链上有第二道拦截（材质里就算有 `time` 也不会覆盖帧值）。
 4. 新增帧级注入：黑名单两处 + `_inject_lighting` + 本表 + GL 测试各一处，共五处同步。
+5. **`time` 的语义**：全帧一致、单调递增的运行秒数（`engine.get_elapsed_time()`），
+   每帧取一次写进所有声明 `owner=runtime` 的 uniform。SSVEP 的相位因此为
+   `sin(2π·freq·time + phase)` —— `time` 不写 = 恒黑（2026-11 之前就是这个状态）。
 
 ---
 
 ## 6. 材质默认值系统与「切 shader 重置」语义
 
-- 默认值生成：见 §2.3 表。**float 类默认 0** 催生「哨兵约定」：
+### 6.1 `//!` 注解 —— 参数的唯一描述来源
+
+**动机**：同一份「这个 uniform 是什么」以前写在 4 个地方 —— GLSL 声明（类型）、`Material`
+（按类型填白/0）、`ScenePanel`（`if shader_name == 'Basic'` 才给色盘）、`LiveCommandServer`
+（按参数名手写 key）。结果每加一个参数要改四处，漏一处就静默不生效，agent 侧表现为"工具缺口"。
+
+现在只有一处：**声明上一行（或同行 `;` 之后）的 `//!` 注释**。GUI 形态、范围、默认值、校验、
+文档全部由它派生（`Application/Resource/UniformSpec.py`）。
+
+语法（`//!` 前缀，机读；普通 `//` 注释保持自由，不影响语义）：
+
+```
+//! ui:<kind> | label=<i18n 键> | group=<分组> | range=<min>..<max> | step=<n>
+//!   | default=<v[,v...]> | unit=<Hz|rad|deg> | choices=<v>:<标签键>[, ...]
+//!   | owner=<content|engine|runtime> | readonly | doc=<一行说明>
+```
+
+| 字段 | 说明 |
+|---|---|
+| `ui:<kind>` | 控件形态：`float` `int` `bool` `color3` `color4` `vec2/3/4` `enum` `readonly` `array`。省略则按 GLSL 类型推断（`vec4` 仍是四条滑杆，**不会**自动变颜色） |
+| `label` | i18n 键，回退 = uniform 名 |
+| `group` | 面板分组（同组折叠），键 = `mat.group.<group 小写>` |
+| `range` | 滑杆上下限，同时是**写入校验**边界 |
+| `step` | 拖动步长 |
+| `default` | **真正的默认值**（`.mat` 新建 / 复位用）。GLSL 的 `= 0.0` 只是语言要求，不再当哨兵 |
+| `unit` / `doc` | 显示单位（`Hz`/`rad`/`deg`）、悬浮说明 |
+| `choices` | `enum` 的取值与标签键 |
+| `owner` | `content`（默认，进材质）/ `engine`（渲染器每帧注入）/ `runtime`（引擎运行期值，当前只有 `time`） |
+| `readonly` | 强制只读（不进材质、GUI 灰显） |
+
+内置 shader 现状（全部已注解）：
+
+```glsl
+// Basic.frag
+//! ui: color4 | label=mat.color | group=Surface | default=1,1,1,1
+uniform vec4 uColor = vec4(1.0);
+
+// Lighting.frag —— 高光指数：真正的默认 32，范围 1..256
+//! ui: float | label=mat.shininess | group=Specular | range=1..256 | step=1 | default=32
+uniform float uShininess = 0.0;     // 0 = 旧材质的"用默认"哨兵（shader 里回落 32）
+
+//! ui: enum | label=mat.specular_model | group=Specular | choices=0:mat.phong,1:mat.blinn | default=0
+uniform int uSpecularModel = 0;
+
+// SSVEP.frag —— 刺激参数（实验侧真正要调的三个）
+//! ui: float | label=mat.freq | group=Stimulus | range=1..60 | step=0.1 | unit=Hz | default=10
+uniform float freq;
+//! ui: float | label=mat.phase | group=Stimulus | range=0..6.283 | step=0.01 | unit=rad | default=0
+uniform float phase_shift;
+//! ui: readonly | owner=runtime | label=mat.time | group=Stimulus
+uniform float time;
+```
+
+**降级规则**（保证老 shader 不改也能跑）：无注解 → kind 按 GLSL 类型推断、`editable=True`、
+无范围、默认值回落 §2.3 表 —— 与 2026-11 之前逐字段一致。注解写错（无法解析的 token）
+静默忽略，绝不让引擎崩。
+
+### 6.2 默认值与「哨兵约定」
+
+- 新建材质：`build_default_uniforms()`（`UniformSpec.py`，**唯一**实现）优先 `spec.default`，
+  否则回落类型默认。`ResourceManager` 里旧的 `uShininess = 32.0` 硬编码已删除。
+- 复位：`ResourceManager.ResetMaterialUniform(s)` 把值写回注解默认（面板的 \(\circlearrowleft\) 按钮
+  走 `SceneBrowserController.reset_material_uniform(s)`，会先 `_ensure_unique_material` 克隆，
+  不动共享/内置材质）。
+- **哨兵约定仍在**（旧 `.mat` 文件里 `uShininess` 存的是 0）：
 
   ```glsl
-  uniform float uShininess = 0.0;               // 声明默认（防御）
   float shininess = (uShininess > 0.0) ? uShininess : 32.0;   // 0 = 用默认 32
   ```
 
-  材质显式存 32（DefaultLit 即如此）与保持 0 等价；新 shader 采用此模式时必须在
-  §10 表登记「哨兵含义」。
+  所以注解里 `range` 下限写成 `0.001`/`1` —— 让面板不可能再产出 0 这个哨兵值。
+  新 shader 若用哨兵模式，必须在 §10 表登记含义。
+  > 后续（S2）：`.mat` 改稀疏存（只存改过的键）+ 加载时把 0 归一到注解默认，哨兵约定即可退役。
 
-- **★ 切 shader 会重建材质参数表**：`SetEntityShader` → `material.set_new_shader()` 按新
-  shader 的 `uniforms_name_type` **重建 `uniforms_data`**，旧参数（含 uColor）全部丢失重置为默认。
-  编辑器/MCP 路径要「先切 shader，后设颜色/uniform」（GL 测试与 live 演示双次踩中，教训入此）。
+### 6.3 切 shader 会重建参数表
 
-- 序列化：`.mat` JSON 含 `shader_id / blend / texture_ids / uniforms`；`load_from_file` 缺
-  `blend` 字段回退 `"opaque"`（旧文件兼容）。
+`SetEntityShader` → `material.set_new_shader()` 按**新 shader** 的 `uniforms_name_type` +
+`uniform_specs` 重建 `uniforms_data`，旧参数（含 uColor）全部丢失重置为默认。
+编辑器/MCP 路径要「先切 shader，后设颜色/uniform」（GL 测试与 live 演示双次踩中，教训入此）。
+
+### 6.4 序列化与引用唯一性
+
+- `.mat` JSON：`name / shader_id / shader_ref / blend / texture_ids / texture_refs / uniforms`。
+- **`shader_ref` 是持久化身份**：`builtin://Basic` 或绝对路径。`shader_id` 是会话级自增，
+  跨会话必然错位 —— 旧文件没有 `shader_ref` 时按 `shader_id` 回退（兼容），有新文件优先按 ref。
+  解析顺序见 `ResourceManager.ResolveShaderRef`：`builtin://名称` 精确 → 路径精确 →
+  文件名唯一（多命中视为歧义，返回 0 不猜）。
+- **`texture_refs` 同理**：与 `texture_ids` 平行，`builtin://名称` / 绝对路径；
+  程序化/媒体帧纹理没有落点 → 空串（保留 id 回退，这类纹理本来就不可跨会话复用）。
+  `LoadMaterialFromFile` 解析不到 ref 时才用保存的 id。
+- 缺 `blend` 回退 `"opaque"`；缺 `shader_ref` / `texture_refs` 回退 id —— 旧文件兼容。
+- 与 `MaterialRef` / `ResolveMaterialRef` 同一条纪律：**资源 id 不能当跨会话身份**。
+  三条链（shader / texture / material）现在都走「稳定引用 → 会话内 id」的同一套解析顺序。
 
 ---
 
@@ -243,19 +328,25 @@ fallback 钉死 OFF（回退用例单独开关）；面光源均摆在**发光�
 | 限制 | 说明 | 解除条件 |
 |---|---|---|
 | 法线矩阵简化 | `mat3(model)` 不支持非均匀缩放 | 出现需求时换 inverse-transpose |
-| 材质不支持 int/数组 uniform | §2.3 | 扩充材质类型表 |
+| 数组 uniform 不可编辑 | 数组只读展示（避免按 vec3 误上传）；单值 int 已支持 | 出现数组参数需求 |
+| `.mat` 仍是全量存 | 每个参数抄一份默认值 → 改 shader 默认不跟随旧材质 | S2：稀疏存储 |
+| 材质 0 哨兵 | 旧 `.mat` 的 `uShininess=0` 靠 GLSL 回落 | S2：加载时归一 |
 | 光照无阴影 | 平面光/点光均不产 shadow map | roadmap P2/P3 |
 | SPIR-V 旁路仅 Vulkan 实验 | GL 路径永远用 GLSL 源 | — |
+| 运行期注入仅 GL 后端 | `_inject_runtime` 在 `OpenGLEntities`；Vulkan/ZenGL 实验后端未接 → 那边 SSVEP 仍静态 | 启用对应后端时补 |
 
 ---
 
 ## 10. 内置 shader 现状表
 
-| shader | id | 用途 | 材质参数 | 顶点属性 | 测试覆盖 |
-|---|---|---|---|---|---|
-| Basic | 1 | unlit 平面/刺激/媒体 | `uColor` | loc0/1（loc2 浪费） | gl_pixels 全节 |
-| SSVEP | 2 | SSVEP 闪频刺激 | 专用 | loc0/1 | vertex_layout 快照 |
-| Lighting | 3 | 受光 3D（默认 Cube；面光源 + 点光源） | `uColor` `uShininess`(0→32) `uSpecularStrength`(0→0.25) `uDiffuseStrength`(0→1) `uAmbientStrength`(0→1) `uSpecularModel`(0=Phong/1=Blinn) | loc0/1/2 全用 | gl_lighting 21 checks |
+| shader | id | 用途 | 材质参数（注解声明） | 运行期注入 | 顶点属性 | 测试覆盖 |
+|---|---|---|---|---|---|---|
+| Basic | 1 | unlit 平面/刺激/媒体 | `uColor`（color4，默认白） | — | loc0/1（loc2 浪费） | gl_pixels 全节 |
+| SSVEP | 2 | SSVEP 闪频刺激 | `freq`（Hz，1–60，默认 10）· `phase_shift`（rad，0–2π） | `time`（owner=runtime） | loc0/1 | vertex_layout 快照 · uniform_schema |
+| Lighting | 3 | 受光 3D（默认 Cube；面光源 + 点光源） | `uColor` · `uShininess`(1–256，默认 32) · `uSpecularStrength`(0.001–1，默认 0.25) · `uDiffuseStrength`(0.001–4，默认 1) · `uAmbientStrength`(0.001–1，默认 1) · `uSpecularModel`(enum 0=Phong/1=Blinn) | — | loc0/1/2 全用 | gl_lighting 21 checks · uniform_schema |
+
+> 面板呈现：参数按 `group` 折叠成组（`Surface` / `Specular` / `Stimulus`），带单位与"已改"标记，
+> 单参数与整组复位按钮都在面板上。`time` 只读灰显、标注"引擎驱动"。
 
 ---
 
@@ -264,12 +355,15 @@ fallback 钉死 OFF（回退用例单独开关）；面光源均摆在**发光�
 1. **文件对**：`Name.vert` + `Name.frag` 入 `Resource/Shaders/Builtin/`。
 2. **属性对照**：`in` 与目标 `STD_LAYOUT` 布局对齐（§3）；加了/删了属性 → 更新
    `test_vertex_layout.py` 快照表。
-3. **uniform 归属**：每个 uniform 填进 §5 表（矩阵/材质/注入）。
+3. **uniform 注解**：每个「人可调」的参数写一行 `//!`（§6.1）—— 控件形态、范围、单位、默认值、
+   分组。**这一步替代了以前「改面板代码」**；矩阵/时间这类注入项标 `owner=engine|runtime`。
+4. **uniform 归属**：每个 uniform 填进 §5 表（矩阵/材质/运行期/注入）。
    帧级注入项 → 黑名单两处同步。
-4. **注册**：`DEFAULT_SHADER_NAME/FILE`（内置）；需要默认材质就绪的话在
+5. **注册**：`DEFAULT_SHADER_NAME/FILE`（内置）；需要默认材质就绪的话在
    `__load_default_material` 加（参照 DefaultLit 模式）。
-5. **测试**：快照行（vertex_layout）+ 至少一个像素级用例（守卫本协议数值）→ runner 全绿。
-6. **文档**：本文件 §10 表 + `rendering_protocol.md §6` 发现清单同步。
+6. **测试**：快照行（vertex_layout）+ 至少一个像素级用例（守卫本协议数值）+
+   `test_uniform_schema.py`（注解解析/默认值/引用唯一性）→ runner 全绿。
+7. **文档**：本文件 §10 表 + `rendering_protocol.md §6` 发现清单同步。
 
 ---
 
@@ -277,5 +371,7 @@ fallback 钉死 OFF（回退用例单独开关）；面光源均摆在**发光�
 
 - `rendering_protocol.md` — 架构 / 命令 / **§7 渲染目标(RT)** / **§8 光照体系**（运行链路）/ 验证体系
 - `roadmap_next.md` 章 G — 能力差距与优先级
+- `content_schema_plan.md` — S1–S5 迁移路线（本文 §6.1 是其 S1 落地）
 - 测试：`test_vertex_layout.py`（布局快照）· `test_gl_pixels.py`（Basic 行为）·
-  `test_gl_lighting.py`（光照数值）· `test_material_isolation.py`（材质隔离）
+  `test_gl_lighting.py`（光照数值）· `test_material_isolation.py`（材质隔离）·
+  `test_uniform_schema.py`（注解/GUI 契约/引用唯一性/时间注入）

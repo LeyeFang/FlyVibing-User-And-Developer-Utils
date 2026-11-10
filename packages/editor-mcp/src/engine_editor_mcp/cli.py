@@ -18,6 +18,7 @@
     engine-editor-cli doc [tools|tool 名]        # 内置文档（索引优先）+ 开发工具索引
     engine-editor-cli launch [--port auto|8977]  # 启动引擎并等待就绪（多实例自动选空闲端口）
     engine-editor-cli engines                   # 扫描 8977..9076，列出运行中的编辑器
+    engine-editor-cli ports                     # 端口台账: 谁占了端口 / 目的 / 涉及工程
 
 退出码: 0 成功 / 1 引擎或运行时错误 / 2 用法错误。
 
@@ -48,6 +49,7 @@ from .client import (
     send_raw,
     validate_graph_orchestrate,
 )
+from . import ports as port_ledger
 from .launcher import LaunchError, discover_engines, launch_engine
 
 # 全透明帧（引擎标 blank）自动重抓次数 — 上下文刚建/窗口还没画首帧时能自救。
@@ -326,6 +328,11 @@ def cmd_launch(ns) -> int:
             language=ns.language,
             settings=settings,
             timeout_s=ns.timeout,
+            purpose=ns.purpose,
+            owner=ns.owner,
+            tags=ns.tag,
+            touches=ns.touch,
+            notes=ns.note,
         )
     except ValueError as e:
         return _fail(f"launch: {e}", 2)
@@ -346,6 +353,27 @@ def cmd_engines(ns) -> int:
         return _fail("--start must be <= --end", 2)
     found = discover_engines(ns.start, ns.end, ns.timeout)
     _out({"count": len(found), "engines": found, "range": [ns.start, ns.end]})
+    return 0
+
+
+def cmd_ports(ns) -> int:
+    """端口台账 — 列出被占用的端口及其「目的 / 归属 / 涉及工程」。
+
+    用途: 启动前先看这个，决定复用已有实例还是另起一个，避免两个 agent 抢同一端口/工程。
+    stdout 是结构化 JSON（含每个端口的完整台账条目），stderr 是人读摘要。
+    """
+    if ns.start > ns.end:
+        return _fail("--start must be <= --end", 2)
+    rows = port_ledger.scan(ns.start, ns.end, timeout=ns.timeout, include_free=ns.all)
+    busy = [row for row in rows if row["state"] != "free"]
+    _out({
+        "range": [ns.start, ns.end],
+        "count": len(busy),
+        "ports": rows,
+        "ledger": str(port_ledger.ledger_dir()),
+    })
+    for row in busy:
+        sys.stderr.write(f"  {row['port']}  {row['state']:<9} {row['summary']}\n")
     return 0
 
 
@@ -570,6 +598,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
                    help="设置覆盖（可重复，如 --set ui.font_scale=1.15）")
     p.add_argument("--timeout", type=float, default=30.0, help="等待就绪秒数")
+    p.add_argument("--purpose", default=None, help="这一实例在做的事（写进端口台账，后来者可见）")
+    p.add_argument("--owner", default=None, help="归属（如 agent:codebuddy / 人名）")
+    p.add_argument("--tag", action="append", default=[], metavar="TAG", help="标签（可重复）")
+    p.add_argument("--touch", action="append", default=[], metavar="PATH",
+                   help="这一实例可能写入的目录/文件（可重复；后来者据此避开同目录）")
+    p.add_argument("--note", default=None, help="给后来者的提醒（如：别在此实例跑全量测试）")
     p.set_defaults(func=cmd_launch)
 
     p = sub.add_parser("engines", help="扫描端口频段，列出运行中的编辑器")
@@ -577,6 +611,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--end", type=int, default=9076)
     p.add_argument("--timeout", type=float, default=0.25)
     p.set_defaults(func=cmd_engines)
+
+    p = sub.add_parser("ports", help="端口台账（谁占了端口 / 目的 / 归属 / 涉及工程）")
+    p.add_argument("--start", type=int, default=8977)
+    p.add_argument("--end", type=int, default=9076)
+    p.add_argument("--all", action="store_true", help="连空闲端口一起列（默认只看被占/预占）")
+    p.add_argument("--timeout", type=float, default=0.08, help="单端口探测超时秒数")
+    p.set_defaults(func=cmd_ports)
 
     return parser
 

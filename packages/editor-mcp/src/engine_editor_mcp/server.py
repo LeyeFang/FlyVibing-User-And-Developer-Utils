@@ -784,6 +784,7 @@ def engine_launch(
     language: str | None = None,
     settings: dict | None = None,
     timeout_s: float = 30.0,
+    describe: dict | None = None,
 ) -> dict:
     """启动一个编辑器实例并等待命令总线就绪（多引擎/多 agent 自动端口协商）。
 
@@ -793,12 +794,19 @@ def engine_launch(
         language: "en" / "zh"（省略用 Settings 当前值）
         settings: 与 Settings 面板同键的覆盖，如 {"ui.font_scale": 1.15}
         timeout_s: 等待就绪秒数
+        describe: 实例自述（写端口台账，其它 agent 查端口时可见）—
+                  {purpose, owner, tags, touches, notes}; 也可事后 engine_call instance.describe
 
     成功后本 MCP 进程的后续 engine_call/batch/capture 自动使用返回的 port。
+    启动前建议先看 `engine-editor-cli ports`，能复用已有实例就不要另起。
     """
     from .launcher import LaunchError, launch_engine
+    meta = dict(describe or {})
+    unknown = sorted(set(meta) - {"purpose", "owner", "tags", "touches", "notes"})
+    if unknown:
+        return {"ok": False, "error": "bad_describe", "detail": f"unknown keys: {unknown}"}
     try:
-        result = launch_engine(engine_root, port, language, settings, timeout_s)
+        result = launch_engine(engine_root, port, language, settings, timeout_s, **meta)
     except LaunchError as e:
         try:
             payload = json.loads(str(e))

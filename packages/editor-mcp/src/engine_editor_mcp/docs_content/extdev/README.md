@@ -60,5 +60,7 @@
 |---|---|
 | `extension_dev_protocol.md` | **规范全文**（14 节）：快速上手 / manifest / 生命周期 / ctx 能力 / UI / 节点包 / MCP-CLI 生态 / 线程 / 测试 / 实装地图 / 提交检查单 |
 | `ui_development.md` | **UI 开发指南**：`ctx.ui.register_window`、`UIExtensionBase`、`close_policy`、线程/测试/审查 |
+| `ui_recipes.md` | **面板配方**：参数行 / 设置持久化 / 表格 / 日志 / 波形 / 确认框 / 禁用原因 / 线程队列 / 无头自测，复制就能跑 |
+| `../dev/imgui_api` | **控件目录**（生成物）：按用途归类的 imgui-bundle 接口、返回形状、`##` 作用域、flag 速查、宿主侧禁用清单 |
 | `node_development.md` | **节点开发指南**：`NodePackRegistry`、node_pack.py、pins/fields、evaluator、发现与校验 |
 | `example_development.md` | **Example 开发指南**：场景 + 节点图 + README + PIE/干跑/导出验收 |
