@@ -246,6 +246,8 @@
 | `camera.set` | Inspector Camera 字段 | Inspector 回显、视口/PIE 相机生效 | D + Q |
 | `renderer.snapshot` | —（渲染器诊断） | — | — |
 | `threads.snapshot` | —（线程诊断；`Utils/Dev/thread_probe.py` 同数据源） | — | — |
+| `perf.profile` | —（分相计时开关；`Doc/Dev/phase_profiling_protocol.md`） | — | — |
+| `perf.phases` | —（分相统计；同 `PerfStatsLayer` 数据源） | — | — |
 | `entity.list` | Entities 树 | — | D |
 | `entity.get` | Inspector 检视区 | — | D |
 | `entity.add` | 工具条 + New / 空区右键 New Entity | 树新增行；**自动选中**（高亮 + Inspector + 轮廓 + gizmo 隐藏） | D + C |

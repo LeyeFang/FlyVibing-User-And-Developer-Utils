@@ -129,6 +129,17 @@ OPS: dict[str, OpSpec] = {o.name: o for o in [
     # ── threads ──
     OpSpec("threads.snapshot", "threads",
            "线程注册表快照（注册/未注册漂移/停滞检测; 见 Doc/Dev/threading_protocol.md）"),
+    # ── perf ──
+    OpSpec("perf.profile", "perf",
+           "开关分相计时（见 Doc/Dev/phase_profiling_protocol.md）",
+           (Param("on", "bool", False, "true=开 / false=关（省略=查询当前状态）"),
+            Param("reset", "bool", False,
+                  "true=清空样本（已开启时不会自动清 → 对照实验必须带）"),
+            Param("target", "enum", False, '"editor"(默认) / "pie" / "all"'))),
+    OpSpec("perf.phases", "perf",
+           "分相统计快照（帧内各相排他时间/占比/百分位 + 未归因时间）",
+           (Param("target", "enum", False, '"all"(默认) / "editor" / "pie"'),
+            Param("text", "bool", False, "true=附带人读表格"))),
     OpSpec("camera.get", "view", "读取场景摄像机（Transform + Camera）",
            (Param("role", "enum", False, '"3d"(默认) / "2d" / "overlay"'),)),
     OpSpec("camera.set", "view", "修改场景摄像机（仅传字段）",
