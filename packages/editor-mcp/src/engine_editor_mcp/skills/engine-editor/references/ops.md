@@ -10,10 +10,11 @@
 
 启动 PIE（等同 Run 按钮；启动前硬预检，force 跳过 / auto_fix 自动修）
 
-预检只看“必然不生效”的状态（如未注册节点类型 → 图不会求值）。被拦时返回 {"error": "preflight_failed", "problems": [...]}，每条带 fix（可复制命令）与 owners（缺哪个扩展）；原因同时写入 sim.state 的 last_error，force 运行时 sim.state 会一直带 forced_unknown_types。
+预检只看“必然不生效”的状态（如未注册节点类型 → 图不会求值）。被拦时返回 {"error": "preflight_failed", "problems": [...]}，每条带 fix（可复制命令）与 owners（缺哪个扩展）；原因同时写入 sim.state 的 last_error，force 运行时 sim.state 会一直带 forced_unknown_types。lockstep=false 时 PIE 渲染不再等编辑器帧（旧行为让 PIE 被编辑器帧率钉死；见 Doc/Dev/phase_profiling_protocol.md）。
 
 - `force` (bool, 可选) — true=跳过未知节点类型等预检硬拦（默认 false）
 - `auto_fix` (bool, 可选) — true=先启用缺失扩展并就地补全画布节点，再启动
+- `lockstep` (bool, 可选) — true=PIE 渲染与编辑器严格逐帧交替（旧行为/确定性对照）；默认 false=解耦
 
 - 示例: `engine-editor-cli call sim.play force=true auto_fix=true`
 
@@ -25,7 +26,7 @@
 
 ### `sim.state`
 
-查询模拟状态（state / runtime_alive）
+查询模拟状态（state / runtime_alive / lockstep；运行时附带 pie_fps 与帧分布）
 
 - 示例: `engine-editor-cli call sim.state`
 

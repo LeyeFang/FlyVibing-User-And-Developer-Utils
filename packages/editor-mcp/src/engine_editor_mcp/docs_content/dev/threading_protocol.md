@@ -11,7 +11,7 @@
 | name（注册名） | owner | 启动点 | 心跳 | 同步通道 |
 |---|---|---|---|---|
 | `render:<Engine>` | Engine | `Engine.init` → `_render_loop` | expect_hz=20（每帧） | 命令队列（renderer.enqueue） |
-| `logic:<Engine>` | Engine | PIE 时 `logic_loop` | expect_hz=20（每帧; 限帧 240） | 帧同步（FrameSync master/slave） |
+| `logic:<Engine>` | Engine | PIE 时 `logic_loop` | expect_hz=20（每帧; 限帧 240） | 与渲染**无同步**（自由跑） |
 | `LiveCommandServer` | LiveCommandServer | `start()` → `_accept_loop` | expect_hz=2（0.5s 超时轮询） | `_queue` + Event（主线程 pump） |
 | `live-client:<tid>` | LiveCommandServer | 每连接一个 | 0（阻塞 recv） | 同上（每请求投递） |
 | `GraphValidation#<id>` | NodeGraph.validation | `start()` → `_work` | 0（单任务） | 锁保护任务槽 |
@@ -19,8 +19,15 @@
 | `eeg-<brand>-service` | ServiceClient | `_start_reader`（push 模式） | 0（阻塞 recv） | rid 路由 + 回调 |
 | `spd-io` | SerialParallelDevice | `start()` | 0（队列驱动） | 任务队列（tx_queue） |
 
-> 品牌独立进程**自己的线程**运行在它自己的进程里——引擎快照看不到它；
-> 引擎侧与之通信的线程 = `eeg-<brand>-service`（ServiceClient reader 模式，本协议的标准样例）。
+> 品牌独立进程**自己的线程**运行在它自己的进程里——引擎快照看不到它；> 引擎侧与之通信的线程 = `eeg-<brand>-service`（ServiceClient reader 模式，本协议的标准样例）。
+
+**帧同步（1.2 起默认关闭）**: 旧行为由 `FrameSync` 把 PIE 渲染线程逐帧挂在编辑器
+`master_tick` 上，实测 `frame.sync_wait` 占 PIE 帧的 **84.5%**（28.0 / 33.2 ms）——
+一个 30 fps 的编辑器把 PIE 钉在 30 fps。PIE 与导出成品是**同一条渲染路径**，成品
+从来没有这个同步对象。现在 `sim.play` 默认 `lockstep=false`（不挂载，`sync=null`），
+`lockstep=true` 仅作确定性对照开关。实测（MISSSEP-AllConditions，vsync off）：
+PIE 渲染从 29 fps → **518 fps**（mean 1.93 ms）；刺激时序不受影响
+（20 Hz p50 = 50.000 ms，p95 偏差 0.83 → 0.44 ms）。
 
 ## 2. 跨线程三通道（只许这三种）+ 禁止项
 

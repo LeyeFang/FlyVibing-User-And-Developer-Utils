@@ -70,14 +70,19 @@ OPS: dict[str, OpSpec] = {o.name: o for o in [
     # ── sim ──
     OpSpec("sim.play", "sim", "启动 PIE（等同 Run 按钮；启动前硬预检，force 跳过 / auto_fix 自动修）",
            (Param("force", "bool", False, "true=跳过未知节点类型等预检硬拦（默认 false）"),
-            Param("auto_fix", "bool", False, "true=先启用缺失扩展并就地补全画布节点，再启动")),
+            Param("auto_fix", "bool", False, "true=先启用缺失扩展并就地补全画布节点，再启动"),
+            Param("lockstep", "bool", False,
+                  "true=PIE 渲染与编辑器严格逐帧交替（旧行为/确定性对照）；默认 false=解耦")),
            detail="预检只看“必然不生效”的状态（如未注册节点类型 → 图不会求值）。"
                   "被拦时返回 {\"error\": \"preflight_failed\", \"problems\": [...]}，"
                   "每条带 fix（可复制命令）与 owners（缺哪个扩展）；"
                   "原因同时写入 sim.state 的 last_error，force 运行时 sim.state "
-                  "会一直带 forced_unknown_types。"),
+                  "会一直带 forced_unknown_types。"
+                  "lockstep=false 时 PIE 渲染不再等编辑器帧（旧行为让 PIE 被编辑器"
+                  "帧率钉死；见 Doc/Dev/phase_profiling_protocol.md）。"),
     OpSpec("sim.stop", "sim", "停止 PIE（等同 Stop 按钮）"),
-    OpSpec("sim.state", "sim", "查询模拟状态（state / runtime_alive）"),
+    OpSpec("sim.state", "sim",
+           "查询模拟状态（state / runtime_alive / lockstep；运行时附带 pie_fps 与帧分布）"),
     # ── device ──
     OpSpec("device.save", "device", "不停采保存设备录制（session/buffer；返回 paths/samples/written）",
            (Param("device", "str", False, "会话名（省略 = 自动绑定唯一会话）"),
