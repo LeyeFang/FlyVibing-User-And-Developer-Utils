@@ -60,6 +60,8 @@ CATEGORY_ORDER = [
     ("hotkeys", "输入热键"),
     ("frame", "抓帧（内部）"),
     ("threads", "线程诊断"),
+    ("perf", "性能诊断"),
+    ("path", "路径与宏"),
     ("editor", "编辑器"),
 ]
 
@@ -145,6 +147,17 @@ OPS: dict[str, OpSpec] = {o.name: o for o in [
            "分相统计快照（帧内各相排他时间/占比/百分位 + 未归因时间）",
            (Param("target", "enum", False, '"all"(默认) / "editor" / "pie"'),
             Param("text", "bool", False, "true=附带人读表格"))),
+    # ── path ──
+    OpSpec("path.roots", "path",
+           "路径根与宏（engine/project/game/output/cwd + 可解析单个 spec）",
+           (Param("resolve", "str", False,
+                  "要解析的路径 spec（可含 <Macro>），返回 expanded 与 absolute"),
+            Param("text", "bool", False, "true=附带人读摘要")),
+           detail="宏: <EngineRoot>(别名 <EditorRoot>) / <ProjectRoot> / <GameRoot> / "
+                  "<OutputRoot> / <Cwd>，大小写不敏感；`<` `>` 在 Windows 上是非法文件名，"
+                  "所以不会与真实目录混淆。相对路径默认落在 output 根。"
+                  "未知宏返回 resolve.error（不静默降级）。"
+                  "扩展侧等价接口: ctx.paths.resolve(spec)。"),
     OpSpec("camera.get", "view", "读取场景摄像机（Transform + Camera）",
            (Param("role", "enum", False, '"3d"(默认) / "2d" / "overlay"'),)),
     OpSpec("camera.set", "view", "修改场景摄像机（仅传字段）",

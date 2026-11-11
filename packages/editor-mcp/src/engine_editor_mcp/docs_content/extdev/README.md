@@ -16,6 +16,7 @@
 | ③ manifest（extension.json）字段参考 | §4（含状态语义/broken 规则） |
 | ④ 生命周期与 ctx 能力 | §5 / §6（M0 实装 vs M1/M2 规划） |
 | ⑤ 扩展 UI / 节点包 | §7 / §8（`[M1]` 设计约定） |
+| ⑤b **写数据 / 文件落在哪** | `paths_and_macros.md`（相对路径默认 `output/`；宏 `<OutputRoot>` / `<ProjectRoot>` …；`ctx.paths.resolve()`；**不要用 `os.getcwd()`**） |
 | ⑥ agent 工具链（MCP / CLI / Skill） | §9 生态核心 + `../User/editor_mcp_guide.md` |
 | ⑦ 测试与提交检查单 | §12 / §14 |
 | ⑧ 静态审查（提交前必跑） | `python FlyVibing-User-And-Developer-Utils/packages/extension-kit/review_extension.py <扩展目录>`（manifest/代码/完备性全查） |

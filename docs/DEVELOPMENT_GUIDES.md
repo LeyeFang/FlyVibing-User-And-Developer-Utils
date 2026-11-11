@@ -13,6 +13,7 @@
 | 给扩展加节点 | [节点开发指南](../packages/editor-mcp/src/engine_editor_mcp/docs_content/extdev/node_development.md) | `engine-editor-cli doc outline extdev/node_development` |
 | 做一个官方/用户 Example | [Example 开发指南](../packages/editor-mcp/src/engine_editor_mcp/docs_content/extdev/example_development.md) | `engine-editor-cli doc outline extdev/example_development` |
 | 在用户目录注入自己的 Example（不污染主线） | [Example 开发指南 §1.1](../packages/editor-mcp/src/engine_editor_mcp/docs_content/extdev/example_development.md) | 写入 `%APPDATA%/FlyVibingEngine/examples/<Name>/`，`.myproj` 加 `provider` |
+| **决定数据存到哪里**（相对路径 / 宏 / 绝对） | **[路径与宏](../packages/editor-mcp/src/engine_editor_mcp/docs_content/extdev/paths_and_macros.md)** | `engine-editor-cli call path.roots resolve="<OutputRoot>/seed/x.txt"`；代码里用 `ctx.paths.resolve(...)` |
 | 让扩展自带 Example（推荐，零拷贝） | [Example 开发指南 §1.2](../packages/editor-mcp/src/engine_editor_mcp/docs_content/extdev/example_development.md) | 放 `<extension_dir>/Examples/<Name>/`；额外根目录用 `capabilities:["examples"]` + `ctx.examples.register` |
 | 在图中保存设备录制（不停采） | [设备 IO 协议 §3](../packages/editor-mcp/src/engine_editor_mcp/docs_content/dev/device_io_protocol.md) | 节点 `SaveDeviceData`（Device ▸ Save）或 `engine-editor-cli call device.save ...`；`pump` 后落盘 |
 | 端到端实验流程 | [TUTORIAL.md](TUTORIAL.md) | `engine-editor-cli doc outline dev/...`（内部协议） |
@@ -23,9 +24,12 @@
 
 1. `extdev/README` — 扩展体系是什么、manifest、生命周期。
 2. `extdev/ui_development` 或 `extdev/node_development` — 按你的贡献面选择。
-3. `extdev/example_development` — 把能力放进可运行 Example。
-4. `extension_dev_protocol.md` — 需要精确契约时查全文。
-5. `Doc/Dev/`（引擎内部）— 只有改引擎核心时才需要；扩展作者不必通读。
+3. **`extdev/paths_and_macros` — 写数据之前先读**：相对路径默认落 `output/`，
+   宏 (`<OutputRoot>` / `<ProjectRoot>` …) 管“落在哪个根”；不要把 CWD 或本机
+   绝对路径写进节点 prop（换机器就断，导出会告警）。
+4. `extdev/example_development` — 把能力放进可运行 Example。
+5. `extension_dev_protocol.md` — 需要精确契约时查全文。
+6. `Doc/Dev/`（引擎内部）— 只有改引擎核心时才需要；扩展作者不必通读。
 
 ## 3. 文档位置约定
 
@@ -40,6 +44,10 @@
 engine-editor-cli doc
 engine-editor-cli doc outline extdev/ui_development
 engine-editor-cli doc show extdev/node_development#2
+
+# 路径与宏：当前形态的四个根 + 解析预览
+engine-editor-cli call path.roots
+engine-editor-cli call path.roots resolve="<OutputRoot>/seed/x.txt" text=true
 
 # 扩展/节点/Example 的静态检查
 flyvibing-review Application/Functions/<Extension>

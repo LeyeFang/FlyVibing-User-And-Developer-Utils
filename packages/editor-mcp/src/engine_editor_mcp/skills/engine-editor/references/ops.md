@@ -706,6 +706,40 @@ id=device path=C:/envs/eeg/Scripts/python.exe   # 覆盖`
 
 - 示例: `engine-editor-cli call threads.snapshot`
 
+## 性能诊断
+
+### `perf.profile`
+
+开关分相计时（见 Doc/Dev/phase_profiling_protocol.md）
+
+- `on` (bool, 可选) — true=开 / false=关（省略=查询当前状态）
+- `reset` (bool, 可选) — true=清空样本（已开启时不会自动清 → 对照实验必须带）
+- `target` (enum, 可选) — "editor"(默认) / "pie" / "all"
+
+- 示例: `engine-editor-cli call perf.profile on=true reset=true`
+
+### `perf.phases`
+
+分相统计快照（帧内各相排他时间/占比/百分位 + 未归因时间）
+
+- `target` (enum, 可选) — "all"(默认) / "editor" / "pie"
+- `text` (bool, 可选) — true=附带人读表格
+
+- 示例: `engine-editor-cli call perf.phases target="mesh" text=true`
+
+## 路径与宏
+
+### `path.roots`
+
+路径根与宏（engine/project/game/output/cwd + 可解析单个 spec）
+
+宏: <EngineRoot>(别名 <EditorRoot>) / <ProjectRoot> / <GameRoot> / <OutputRoot> / <Cwd>，大小写不敏感；`<` `>` 在 Windows 上是非法文件名，所以不会与真实目录混淆。相对路径默认落在 output 根。未知宏返回 resolve.error（不静默降级）。扩展侧等价接口: ctx.paths.resolve(spec)。
+
+- `resolve` (str, 可选) — 要解析的路径 spec（可含 <Macro>），返回 expanded 与 absolute
+- `text` (bool, 可选) — true=附带人读摘要
+
+- 示例: `engine-editor-cli call path.roots resolve=VALUE text=true`
+
 ## 编辑器
 
 ### `console.tail`
