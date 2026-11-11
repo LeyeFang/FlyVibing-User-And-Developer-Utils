@@ -228,8 +228,7 @@ rescan:  已装载者全部 unload 后重新扫描（Settings ▸ Extensions ▸
 | 能力 | 状态 | 说明 |
 |---|---|---|
 | `ctx.id / name / version / manifest` | ✅ M0 | 元数据 |
-| `ctx.extension_dir` / `ctx.data_dir` / `ctx.engine_root` | ✅ M0 | 只读资产目录 / 可写数据目录 / 引擎根 |
-| `ctx.log(msg)` | ✅ M0 | `[ext:<id>]` 前缀日志（Console 通道 M1） |
+| `ctx.extension_dir` / `ctx.data_dir` / `ctx.engine_root` | ✅ M0 | 只读资产目录 / 可写数据目录 / 引擎根 || `ctx.output_dir` | ✅ 2026-11-11 | **运行数据落在哪里**（绝对路径）：编辑器 `<引擎>/output`、PIE `<工程>/output`、成品 `<成品>/output` || `ctx.log(msg)` | ✅ M0 | `[ext:<id>]` 前缀日志（Console 通道 M1） |
 | `ctx.ops.register(name, fn, summary="")` | ✅ M0 | **扩展 op**（§9 生态核心） |
 | `ctx.ui.register_window(name, draw_fn, visible=False, flags=None, close_policy="hide", show_on_enable=True, first_pos=None, first_size=None)` | ✅ M1 (2026-10-11; 参数扩展 2026-10-30) | 注册独立窗口（唯一入口 `ExtensionUI`；重名冲突/异常隔离/purge/窗口生命周期完备性 见 §7；默认不抢焦点）。`show_on_enable=False` = **按需窗口**（enable 时 `show_all` 不弹它，用 `ctx.ui.show_window(name)` 或 View 菜单打开）；`first_pos`/`first_size` = 首次出现位置/尺寸（`Cond_.first_use_ever`，附属窗口用它错开主面板） |
 | `ctx.ui.show_window(name)` | ✅ M1 (2026-10-30) | 把本扩展的某个窗口置为可见（主面板里的“打开 XXX”按钮同路径）；非本扩展/不存在 → `False` |
@@ -524,6 +523,14 @@ def register() -> dict:
 ## 11. 设置与数据目录
 
 - 可写状态一律 `ctx.data_dir`（默认 `%APPDATA%/FlyVibingEngine/extensions_data/<id>/`，随启用状态独立；测试/部署可用 `FVE_EXTENSIONS_DATA` 或旧 `MGE_EXTENSIONS_DATA` 覆盖）。
+- **运行数据（录制/日志/表格）一律落在 `ctx.output_dir`**，不要用 `os.getcwd()` 拼相对路径：
+  成品里 CWD 就是成品安装目录 —— 写进去会污染安装目录，装到只读位置还会直接失败。
+  如需相对基准，用 `Application/Core/FileSystem/DataPaths.py` 的
+  `resolve_write_path(raw, relative_to="output"|"project"|"cwd")`；节点侧的
+  `relative_to` 默认就是 `output`。
+  **不要**把本机绝对路径存进节点 prop（录制目录、模型目录）—— 导出器会把它写进
+  `export_manifest.json` 的 `absolute_paths` 并告警，因为它换机器就断。
+  推荐三态：空（= `ctx.output_dir/<ext>/`）/ 相对路径 / 绝对路径（显式覆盖）。
 - `[M1]` `ctx.settings(schema)` 落地后: schema 自动生成设置 UI + 持久化, 禁止自建配置文件到其它位置。
 
 ### 11.1 Python 解释器与依赖（2026-11-09 — `ctx.python`）

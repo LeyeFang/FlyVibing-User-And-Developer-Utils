@@ -150,5 +150,59 @@
 2. `fullscreen` 窗口模式尚未实现（`window.mode` 已预留）。
 3. 自定义资产（mesh/texture/shader）导入不持久化（`project_export_protocol.md` §7.5）——
    用到它们的实验包会缺资源；打包前会强告警。
-4. 实验数据默认写入 `output/`；数据节点仍以 CWD 为相对基准，后续接入 `game.json output_dir` 统一策略。
+4. ~~实验数据默认写入 `output/`；数据节点仍以 CWD 为相对基准，后续接入 `game.json output_dir` 统一策略。~~
+   ✅ **已实现（2026-11-11）** — 见 §4.1 输出根。
 5. Windows Sandbox / 中文路径 / 只读介质 三场景验证（P4）。
+
+---
+
+## 4.1 输出根（output root）— 2026-11-11 落地
+
+### 为什么
+
+范式侧 issue（`ISSUE_20261111_export_file_io_gaps.md`）暴露：成品自带 `output/`
+却**没有任何写入走它**；`TextFileWrite` 按进程 CWD 解析 → 在成品根凭空造出
+`Test/TestProject/...`（装到只读位置直接失败）；扩展把**开发机绝对路径**写进场景
+prop → 换机器写不进去或悄悄写到别人的同名目录。
+
+### 语义
+
+| `relative_to` | 相对路径解析到 |
+|---|---|
+| **`output`（默认）** | 成品 `<bundle>/output` · PIE `<工程>/output` · 编辑器 `<引擎>/output` |
+| `project` | 工程根（成品里 = 成品根） |
+| `cwd` | 进程工作目录（**旧行为**，显式 opt-in） |
+
+- **绝对路径永远原样使用**（显式覆盖）；导出器会在 `export_manifest.json`
+  写 `absolute_paths` 并打 `[Export] PORTABILITY:` 告警。
+- `MGE_OUTPUT_DIR=<path>` 可整体改道（部署/多用户机器/只读盘）。
+- 路径解析唯一实现：`Application/Core/FileSystem/DataPaths.py`
+  （`resolve_write_path` / `data_roots`）。**扩展不要自己拼 `os.getcwd()`**，
+  用 `ctx.output_dir`（`ExtensionContext` 已提供绝对路径）。
+- `save_data(...)` 增加 `base_dir=` 参数；写文件节点传输出根。
+
+### 生效链路
+
+```
+PlayerBootstrap.run()  → GameRuntime.set_data_roots(output_root=session.output_dir,
+                                                   project_root=session.root)
+SimulationController   → GameRuntime.set_data_roots(output_root=<project>/output, ...)
+RuntimeNodeLayer.OnAttach → ExecutionContext.output_root / .project_root
+evaluator (TextFileWrite / SaveData / PathVar) → resolve_write_path(..., roots=ctx.data_roots())
+```
+
+> **dry-run 现在真的零副作用**：旧实现先 `os.makedirs()` 再判 `ctx.dry_run`，
+> 干跑会建目录。已改为先判、后建。
+
+### 导出器文件卫生（同批修复）
+
+| 项 | 行为 |
+|---|---|
+| 目录名跳过 | `.git` / `.hg` / `.svn` / `.venv` / `venv` / `__pycache__` / `.idea` / `.vscode` / `.mypy_cache` / `.pytest_cache` / `.ruff_cache` / `node_modules`（`EXPORT_SKIP_DIR_NAMES`） |
+| 文件后缀跳过 | `*.pyc` / `*.pyo` |
+| 单文件失败 | **不中断整棵树**；收集到 `errors`，摘要里 `copy_error_count` + `[Export] ERROR:` |
+| 可移植性审计 | 场景 prop 里的绝对路径 → `absolute_paths`（含 Windows 盘符 / POSIX 根 / UNC；`builtin://` 不算） |
+
+> 起因：本地扩展常是独立 git 仓库，git 对象在 Windows 上只读 →
+> `copytree` 刷出数百条 `Permission denied`，真告警被淹没且成品处于"部分拷贝"。
+
