@@ -200,7 +200,8 @@ engine-editor-cli call ext.mything.info                # 扩展 op 直接可调�
 | `provider` | 可选 | 扩展自带的 Example/节点默认签名（`@ACME`）；缺省 `@<id>`。单个 `.myproj` / 节点仍可用自身 `provider`/`signature` 覆盖 |
 | `capabilities` | 建议 | 声明所需能力。**合法值集**（与审查器 M5 同源）: `ops` / `ui` / `nodes` / `threads` / `jobs` / `settings` / `device` / `graph` / `examples`。语义见 §6 能力表；`requires` 暂仅解析展示（依赖拓扑 M3） |
 | `export` | 可选 | 默认 `true`。仅控制 **游戏导出**：`false` = 该扩展目录不进入 `File ▸ Export` 游戏层（即使场景用到其节点也会告警并排除）；**不影响安装包**——安装包按 `Application/Functions/official_extensions.json` mainline allowlist 分发。导出清单 `export_excluded` 会记录路径 |
-| `python` | 可选 | 解释器协议（§11.1）：`"engine"` 简写，或 `{mode, path, requirements, probe}`。缺省 = 引擎解释器；依赖冲突时声明 `venv` / `path` |
+| `python` | 可选 | 解释器协议（§11.1）：`"engine"` 简写，或 `{mode, path, requirements, probe}`。缺省 = 引擎解释器；依赖冲突时声明 `venv` / `path`。产物侧另需 `python.runtime`（§11.2，**导出强制**） |
+| `device_aliases` | 可选 | 声明本扩展提供**逻辑设备名**（`@alias`）能力：`{"module": "device_registry", "dir": "."}`。核心 `Application.Core.DeviceAliases` **只读这个键**惰性发现提供者 —— 于是离线校验器、以及用户停用本扩展时的编辑器都能读到机器侧台账（迁移前由核心直接读文件，能力等价）。模块导入时应调用 `DeviceAliases.register(<id>, <module>)`。审查器 M9 校验模块文件存在 |
 
 **状态语义**（`extension.list` / 设置页）: `planned`（无 entry）· `disabled`（可装载未启用）·
 `enabled`（已装载）· `broken`（manifest/加载错误 — 原因在 `error` 字段）。

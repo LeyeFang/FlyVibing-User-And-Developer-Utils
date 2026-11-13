@@ -30,6 +30,7 @@
     M8  manifest `python.runtime` 依赖契约合法，且随产物分发的扩展必须声明
         （extdev protocol §11.2；规范实现在 Application/Core/Extension/
         ExtensionRuntimeDeps.py，本处是镜像 — 两边对拍见 test_extension_python_contract）
+    M9  manifest `device_aliases` 能力声明合法（模块文件存在；核心按声明发现）
     C12 不自备解释器: 不写死绝对 python 路径、不 Popen(sys.executable)（用 ctx.python.spawn）
     C11 不触碰宿主全局 imgui 状态（create/destroy_context、set_ini_filename、io/style 赋值 —
         含 get_io()/get_style() 链式与别名写法）
@@ -295,6 +296,7 @@ def review_extension(ext_dir: str) -> Report:
         rep.ok("M5", f"capabilities={caps if caps else '(未声明)'}")
 
     _review_python_manifest(rep, manifest)
+    _review_device_aliases(rep, manifest, ext_dir)
 
     if str(manifest.get("description", "")).strip():
         rep.ok("M6", "description 非空")
@@ -552,6 +554,41 @@ def _review_runtime_contract(rep: Report, manifest: dict, *, python: dict) -> No
         if requires:
             detail += f" requires={requires}"
         rep.ok("M8", detail)
+
+
+def _review_device_aliases(rep: Report, manifest: dict, ext_dir: str) -> None:
+    """M9 — `device_aliases` 能力声明合法（2026-11-14）。
+
+    核心 `Application.Core.DeviceAliases` 只读这个键来**惰性发现**提供者
+    （离线校验器 / 用户停用该扩展时的编辑器也要能读机器侧台账），所以模块文件
+    必须真实存在；拼错文件名不会有任何报错，只会让别名能力静默消失。
+    """
+    raw = manifest.get("device_aliases")
+    if raw in (None, "", {}):
+        rep.ok("M9", "未声明 device_aliases（不提供逻辑设备名能力）")
+        return
+    if not isinstance(raw, dict):
+        rep.fail("M9", "device_aliases 必须是对象（{\"module\": ..., \"dir\": ...}）")
+        return
+    unknown = sorted(set(raw) - {"module", "dir"})
+    problems: list[str] = []
+    if unknown:
+        problems.append(f"未知键 {unknown}（允许 module / dir）")
+    module = str(raw.get("module") or "").strip()
+    if not module:
+        problems.append("缺少 module")
+    elif not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", module):
+        problems.append(f"module={module!r} 必须是模块名（不带 .py / 不带路径）")
+    rel = str(raw.get("dir") or "").strip()
+    target_dir = os.path.normpath(os.path.join(ext_dir, rel)) if rel else ext_dir
+    if module and not os.path.isdir(target_dir):
+        problems.append(f"dir 不存在: {target_dir}")
+    elif module and not os.path.isfile(os.path.join(target_dir, f"{module}.py")):
+        problems.append(f"模块文件不存在: {os.path.join(target_dir, module + '.py')}")
+    if problems:
+        rep.fail("M9", "device_aliases 声明有问题: " + "; ".join(problems))
+    else:
+        rep.ok("M9", f"device_aliases module={module}" + (f" dir={rel}" if rel else ""))
 
 
 def _scan_py_files(ext_dir: str) -> list:

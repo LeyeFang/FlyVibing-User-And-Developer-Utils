@@ -271,8 +271,13 @@ encode(14,   "string", prefix="20,", suffix=";")   # b'20,14;\n'
 - 注册表实现: **归扩展** `SerialParallelDevice/device_registry.py` —— 原子写（tmp+replace）、
   线程锁、损坏文件容错为空表；名称 `^[A-Za-z][A-Za-z0-9_.-]{0,31}$`；字段
   `transport/port/baud/updated/hint`。
+- 提供者声明（2026-11-14）: `extension.json`
+  ```json
+  "device_aliases": { "module": "device_registry", "dir": "." }
+  ```
+  核心按它**惰性发现**（包限定名导入 → 与扩展自己的 import 同一个模块对象、一份缓存）。
 - 核心侧只有**能力凭据** `Application/Core/DeviceAliases.py`（2026-11-14 起）：
-  `register/unregister` + 查询（`names/get/describe/parse_ref/is_ref/resolve`），
+  `register/unregister/ensure` + 查询（`names/get/describe/parse_ref/is_ref/resolve`），
   **不含实现**。扩展在模块导入时自注册 → 编辑器端口下拉、离线校验器、`SerialSend`
   求值器读的是同一份台账；产物里没有该扩展 → `names()` 返回空、`get()` 返回 `None`
   （编辑器只显示物理端口，校验器给 `device_alias_check_unavailable` 告警）。
