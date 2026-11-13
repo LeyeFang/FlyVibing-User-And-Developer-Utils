@@ -637,6 +637,48 @@ engine-editor-cli call extension.python id=device path=""   # 清除，回落 en
 4. 卸载不需要自己杀子进程（宿主回收；扩展自己 Popen 的仍需自己管）；
 5. `extension.list` 的 `python` 块能看到解析结果（`executable` / `source` / `problems`）。
 
+### 11.2 产物侧依赖（`python.runtime`，2026-11-14 — **导出强制**）
+
+§11.1 描述的是"**编辑器里**扩展代码跑哪个解释器"。它**不描述成品**：成品用的是
+`Resource/runtime` 这份独立镜像（按手写清单烘焙），扩展的包从来不在里面。
+
+> 事故：Gtec 落盘改 HDF5（需 `h5py`）→ PIE 正常、**导出成品在落盘那一刻**才报
+> `h5py is not installed`。能开、能录、实验跑完才炸。
+
+所以 manifest 多了一条**产物轴**，且**导出时强制校验**（不合法 = 导出失败）：
+
+```json
+"python": {
+  "mode": "engine",
+  "runtime": {
+    "mode": "engine",
+    "requires": ["h5py>=3.16"],
+    "probe": ["h5py"],
+    "optional": false,
+    "note": "g.tec g.Recorder layout export needs h5py"
+  }
+}
+```
+
+| `runtime.mode` | 落地 | 谁用 |
+|---|---|---|
+| `engine` | `<产物>/runtime/Lib/site-packages` | **节点代码**（进程内 `import`） |
+| `bundle` | `<产物>/extensions/<id>/env/` | **只有子进程**（进程内节点只有一个解释器） |
+| `none` | — | 无三方依赖（**也必须显式写**） |
+
+- 未知键 = 错误（拼错 `requires` 不会被静默忽略）；
+- `bundle` 用于"三方包版本/ABI 与引擎冲突"——代价是产物 +几百 MB，**只在必需时用**；
+- `engine` 的包按 `<扩展>/wheels/` → `Resource/wheels/` → 引擎 venv 的顺序解析，全部离线；
+- 成品启动即 probe，缺包打 `[Player] ERROR:`（不再等到第一次落盘）。
+
+**完整语言、强制点、自检工具、清单字段**：见 **`extension_dependencies.md`**。
+
+提交前必跑：
+
+```powershell
+python Utils/Dev/check_extension_python.py --all
+```
+
 ## 12. 测试规范（扩展必带自测）
 
 1. 每个扩展自带 `test_<id>_extension.py`（放 `Test/Application/Extensions/` 或扩展目录的

@@ -27,6 +27,9 @@
     C10 无顶层 imgui 上下文/窗口/GL 创建（纯导入允许 — M0 口径）
     M7  manifest `python` 解释器声明合法（mode/path/requirements/probe —
         extdev protocol §11.1）
+    M8  manifest `python.runtime` 依赖契约合法，且随产物分发的扩展必须声明
+        （extdev protocol §11.2；规范实现在 Application/Core/Extension/
+        ExtensionRuntimeDeps.py，本处是镜像 — 两边对拍见 test_extension_python_contract）
     C12 不自备解释器: 不写死绝对 python 路径、不 Popen(sys.executable)（用 ctx.python.spawn）
     C11 不触碰宿主全局 imgui 状态（create/destroy_context、set_ini_filename、io/style 赋值 —
         含 get_io()/get_style() 链式与别名写法）
@@ -418,16 +421,22 @@ def review_extension(ext_dir: str) -> Report:
 
 
 _PY_MODES = ("engine", "venv", "path")
+_RT_MODES = ("engine", "bundle", "none")
+#: `python.runtime` 允许的键（与 Application/Core/Extension/ExtensionRuntimeDeps.py
+#: 的 KNOWN_KEYS 必须一致 — 守卫 Test/Application/Extensions/test_extension_python_contract.py）
+_RT_KEYS = frozenset({"mode", "requires", "probe", "optional", "path", "env", "note"})
 _PY_IMPORT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
+_PY_REQ_RE = re.compile(r"^\s*[A-Za-z0-9][A-Za-z0-9._-]*")
 _ABS_PY_RE = re.compile(r"[A-Za-z]:[\\/][^\s\"'\n]*python(?:\.exe)?", re.IGNORECASE)
 _SPAWN_FUNCS = {"Popen", "run", "call", "check_output", "check_call", "spawnv", "spawnve"}
 
 
 def _review_python_manifest(rep: Report, manifest: dict) -> None:
-    """M7 — `python` 声明结构合法（extdev protocol §11.1）。"""
+    """M7 — `python` 声明结构合法（extdev protocol §11.1 + §11.2 依赖契约）。"""
     raw = manifest.get("python")
     if raw in (None, "", {}):
         rep.ok("M7", "未声明 python（默认引擎解释器）")
+        _review_runtime_contract(rep, manifest, python={})
         return
     if isinstance(raw, str):
         mode = raw.strip().lower()
@@ -435,6 +444,7 @@ def _review_python_manifest(rep: Report, manifest: dict) -> None:
             rep.ok("M7", f"python='{mode}'")
         else:
             rep.fail("M7", f"python='{raw}' 非法（允许 engine / venv / path）")
+        _review_runtime_contract(rep, manifest, python={"mode": mode})
         return
     if not isinstance(raw, dict):
         rep.fail("M7", "python 必须是字符串或对象（extdev protocol §11.1）")
@@ -462,6 +472,85 @@ def _review_python_manifest(rep: Report, manifest: dict) -> None:
     else:
         rep.ok("M7", f"python mode={mode}"
                      + (f" probe={probe}" if probe else ""))
+    _review_runtime_contract(rep, manifest, python=raw)
+
+
+def _review_runtime_contract(rep: Report, manifest: dict, *, python: dict) -> None:
+    """M8 — 产物侧依赖契约 `python.runtime`（2026-11-14，导出强制）。
+
+    这条检查是**规范镜像**：真正的判据在
+    `Application/Core/Extension/ExtensionRuntimeDeps.py`（导出器与成品共用）。
+    本文件刻意不 import 引擎代码（审查器要能在裸工具链里跑），两边一致性由
+    `Test/Application/Extensions/test_extension_python_contract.py` 用同一组夹具
+    对拍守住 —— 改规则请同时改两边。
+    """
+    raw = python.get("runtime") if isinstance(python, dict) else None
+    ext_id = str(manifest.get("id") or "<id>")
+    ships = bool(manifest.get("entry")) and (
+        "nodes" in (manifest.get("capabilities") or ())
+        or isinstance(manifest.get("nodes"), dict)
+        or bool(python)
+    )
+    if raw is None:
+        if ships:
+            rep.fail("M8", f"随产物分发的扩展必须声明 python.runtime —— 成品用独立运行时"
+                           f"镜像，未声明的依赖在成品里必然缺失。无三方依赖也请写 "
+                           f"{{\"mode\": \"none\"}}")
+        else:
+            rep.ok("M8", "不随产物分发，无需 runtime 契约")
+        return
+    if not isinstance(raw, dict):
+        rep.fail("M8", "python.runtime 必须是对象")
+        return
+
+    problems: list[str] = []
+    unknown = sorted(set(raw) - _RT_KEYS)
+    if unknown:
+        problems.append(f"未知键 {unknown}（允许: {sorted(_RT_KEYS)}）")
+    mode = str(raw.get("mode") or ("engine" if str(python.get("mode") or "engine")
+                                   in ("engine",) else "bundle")).strip().lower()
+    if mode not in _RT_MODES:
+        problems.append(f"mode={mode!r} 非法（{'/'.join(_RT_MODES)}）")
+    requires = raw.get("requires")
+    if requires is not None:
+        if not isinstance(requires, list) or not all(
+                isinstance(x, str) and x.strip() for x in requires):
+            problems.append("requires 必须是 PEP 508 字符串列表")
+        else:
+            for item in requires:
+                if not _PY_REQ_RE.match(item):
+                    problems.append(f"requires 项非法: {item!r}")
+    if mode == "none" and (requires or []):
+        problems.append("mode=none 不应带 requires（要装包请用 mode=engine）")
+    if mode == "bundle":
+        path = str(raw.get("path") or python.get("path") or "").strip()
+        if not path:
+            problems.append("mode=bundle 需要 path（或外层 python.path）")
+    if mode == "engine":
+        for item in (requires or []):
+            module = re.split(r"[<>=!~\[;]", str(item), 1)[0].strip().replace("-", "_")
+            if module and not _PY_IMPORT_RE.match(module):
+                problems.append(f"requires 项无法推导 import 名: {item!r}")
+    probe = raw.get("probe")
+    if probe is not None and (not isinstance(probe, list) or not all(
+            isinstance(x, str) and _PY_IMPORT_RE.match(x) for x in probe)):
+        problems.append("probe 必须是 import 名列表")
+    optional = raw.get("optional")
+    if optional is not None and not isinstance(optional, bool):
+        problems.append("optional 必须是 true/false")
+    env = raw.get("env")
+    if env is not None and (not isinstance(env, dict) or
+                            not all(isinstance(k, str) and isinstance(v, str)
+                                    for k, v in env.items())):
+        problems.append("env 必须是 {str: str}")
+
+    if problems:
+        rep.fail("M8", f"[{ext_id}] python.runtime 有问题: " + "; ".join(problems))
+    else:
+        detail = f"mode={mode}"
+        if requires:
+            detail += f" requires={requires}"
+        rep.ok("M8", detail)
 
 
 def _scan_py_files(ext_dir: str) -> list:

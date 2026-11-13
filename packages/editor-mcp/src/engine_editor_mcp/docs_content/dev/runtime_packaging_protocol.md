@@ -128,6 +128,72 @@
 | 子集排除 | `imgui-bundle` + MCP 工具链 26 包（`collect_wheels.py` 的 `_EDITOR_ONLY`） | 包内隐藏后 dry-run + 窗口运行全绿（2026-09-28 实证）；边界测试运行时树扫描（除 Editor 与 Vulkan 外不得 import `imgui_bundle`/`mcp`） |
 | 发行版瘦身 | `Lib/test`(146M) / `Doc`(63M) / 全部 `*.pdb`(266M) | 与运行无关的 CPython 发行版内容 |
 
+## 8. 扩展依赖进产物（2026-11-14 — `python.runtime`）
+
+**问题**：基础镜像是按**手写清单**（`requirements.runtime.txt`）烘焙的，扩展的包从不在里面。
+Gtec 落盘改 HDF5（需 `h5py`）后，PIE 正常、**导出成品在落盘那一刻**才报
+`h5py is not installed`。扩展语言里原本**没有任何字段**描述"产物里这些包从哪来"。
+
+### 8.1 契约（manifest，**导出强制**）
+
+```json
+"python": {
+  "mode": "engine",
+  "runtime": {
+    "mode": "engine",              // engine | bundle | none
+    "requires": ["h5py>=3.16"],    // PEP 508
+    "probe": ["h5py"],             // 与 requires 等长时按位置对应（别名必须这样写）
+    "optional": false
+  }
+}
+```
+
+- `engine` → 装进 `<产物>/runtime/Lib/site-packages`，**节点进程内** `import`；
+- `bundle` → 整个环境拷进 `<产物>/extensions/<id>/env/`，**只给子进程**（进程内节点
+  只有一个解释器，隔离版本必须走子进程）；
+- `none` → 显式声明无三方依赖（**也必须写**）。
+
+权威语言 + 强制点：`extdev/extension_dependencies.md`；
+规范实现：`Application/Core/Extension/ExtensionRuntimeDeps.py`（导出器 / `PlayerBootstrap` /
+`Utils/Dev/check_extension_python.py` / 静态审查器 M8 全部对齐它）。
+
+### 8.2 导出流水线新增步骤
+
+```
+_resolve_export_extensions  → 每个随包扩展 parse 契约
+                              → python_problems 非空 → **导出失败**（写大文件之前）
+_copy Application            → _prune_extension_dirs（Test/Doc/Docs/tests/Examples/wheels）
+_copy runtime                → 基础镜像就位
+_distribute_extension_python → engine: wheelhouse/<ext>/wheels → pip --no-index --no-deps
+                                        → 回退：复制引擎 venv 里的同版本包
+                               bundle: copytree → extensions/<id>/env/
+                               → 写 extensions/python_contracts.json（+ python_envs.json）
+```
+
+★ 安装一律 `--no-deps`：`pip --target` 无视已安装包，会把 numpy 之类**再装一份**，
+覆盖基础镜像的版本（2026-11-14 实测：装 h5py 会连带计划安装 numpy-2.5.1）。
+基础镜像由 `prepare_runtime.py` 负责；缺什么由 probe 报。
+
+### 8.3 成品侧
+
+`PlayerBootstrap.prepare_offline()` 最早处：
+
+1. `extensions/python_envs.json` → `FVE_EXT_PYTHON_<ID>`（子进程用）；产物里没有扩展
+   管理器，靠这一步让 `bundle` 出去的环境可被发现；
+2. `extensions/python_contracts.json` → 逐模块 probe，缺包打
+   `[Player] ERROR: extension 'x' (engine) missing module(s): …`
+   —— **启动就报**，不再等第一次落盘；`optional: true` 降级为 `WARNING`。
+
+### 8.4 清单字段
+
+| 位置 | 内容 |
+|---|---|
+| `export_manifest.json → extensions.python` | 每个随包扩展的契约（`mode/requires/probe/optional/problems`） |
+| `extensions.python_problems` | 非空 = 本次导出被挡下的原因 |
+| `extensions.pruned_subdirs` | 被瘦身删掉的扩展子目录 |
+| `game.extension_python` | 实际落地结果（`installed` 带 `source` = `wheelhouse` / `engine_venv`、`present`、`failed`） |
+
+
 - 生成链：`collect_wheels.py` 写 `requirements.runtime.txt` → `prepare_runtime.py` 按它安装 + `trim_image()` + `check_editor_only()` 断言；
 - 实测（2026-09-28）：镜像 887 → **364 MiB**；整包 1.3 GB → **409 MB**（其中 runtime 324 MB；导出时剔除 `__pycache__`）+ dry-run/窗口 e2e 全绿；
 - ⚠️ 导出包内**不再能运行编辑器**（imgui 不在镜像中）——`wheelhouse/` 保留**全量轮子**与 `requirements.export.txt`，需要“全量/编辑器版”环境时用 wheelhouse 重建即可。
