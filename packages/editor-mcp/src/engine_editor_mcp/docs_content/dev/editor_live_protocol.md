@@ -294,7 +294,7 @@ UI / MCP / 程序三入口共用同一服务实例；L1 规则实现只有一份
 | `project.save` | `editor_project_save` | 保存工程（File ▸ Save Project；`path` 省略=当前路径, 提供=Save As 换根） |
 | `project.export` | `editor_project_export` | 导出工程包（File ▸ Export；`include_player` 默认 true=附游戏层成品含 runtime；false=纯工程包；目标目录须为空或旧导出，`output/` 实验数据保留） |
 | `extension.list` | `editor_extension_list` | 扩展列表+状态+贡献 ops（扩展 op `ext.<id>.*` 增量扫描的发现入口；等价 Extensions 菜单） |
-| `extension.enable` | `editor_extension_enable` | 启用扩展（加载 on_load/on_enable；等同菜单勾选；持久化到 `Config/extensions.json`） |
+| `extension.enable` | `editor_extension_enable` | 启用扩展（加载 on_load/on_enable；同 Settings ▸ Extensions 勾选，**不是** Extensions 菜单勾选 一 后者只切面板显隐；持久化到 `editor_state/extensions.json`） |
 | `extension.disable` | `editor_extension_disable` | 停用扩展（on_disable/on_unload + 注销其全部 ext.<id>.* ops） |
 | `settings.get` | — | 读取编辑器设置（`key` 省略=全量；UI 同路径 = Settings 面板 Common 页，协议 `ui_protocol.md` §13） |
 | `settings.set` | — | 写入编辑器设置（校验+钳制 → 落盘 → **下一渲染帧生效**；脏值返回定格后的实际值） |

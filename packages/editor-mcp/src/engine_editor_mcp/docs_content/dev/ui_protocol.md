@@ -298,8 +298,8 @@
 | `project.export` | File ▸ Export… | 审计日志输出；目标目录旧导出被干净重建（`output/` 实验数据保留） | — |
 | `extension.list` | Extensions 菜单（列表本体） | 扩展状态/贡献 op 清单查询（扩展 op 发现入口） | D |
 | `extension.python` | —（agent 诊断/覆盖；Extensions 菜单只显示状态） | 解析结果与覆盖写入 `editor_state/extensions.json`（v2）；`extension.list` 与 `ext.<id>.status` 同步可见 | — |
-| `extension.enable` | Extensions 菜单 ▸ 勾选启用 | 勾选态、装载日志、`ext.<id>.*` op 注册（增量扫描） | D + C |
-| `extension.disable` | Extensions 菜单 ▸ 取消勾选 | 勾选态、卸载 + 扩展 op 注销 | D + C |
+| `extension.enable` | Settings ▸ Extensions ▸ 启用 | 装载日志、`ext.<id>.*` op 注册（增量扫描）、面板打开；**不写菜单勾选**（菜单勾选 = 面板可见性，见 `ui.panel`） | D + C |
+| `extension.disable` | Settings ▸ Extensions ▸ 取消启用 | 卸载 + 扩展 op 注销 + 条目从 Extensions 菜单消失 | D + C |
 | `settings.get` | Settings 面板 ▸ Common（选项本体） | 无（只读） | D |
 | `settings.set` | Settings 面板 ▸ Common / Export；Edit ▸ Preferences… | 控件值即时反映新值；字体缩放/语言在下一渲染帧生效（含面板标题） | D + Q |
 | `debug.events` | Settings ▸ Debug ▸ Terminal（开关 + 事件类型勾选） | 勾选变化即时生效；未勾选的事件不打印且不 consume（与旧 `_SILENT_EVENTS` 同行为） | D |

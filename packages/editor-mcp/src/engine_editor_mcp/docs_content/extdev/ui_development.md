@@ -76,20 +76,25 @@ engine-editor-cli call ui.panel name="My Panel" visible=true
 
 ## 3. 窗口契约
 
-`ctx.ui.register_window(name, draw_fn, visible=False, flags=None, close_policy="hide")`
+`ctx.ui.register_window(name, draw_fn, visible=False, flags=None, close_policy="hide", show_on_enable=True)`
 
 | 参数 | 说明 |
 |---|---|
 | `name` | 全局唯一；与内置面板/其他扩展重名会抛 `ValueError` |
 | `draw_fn` | 无参函数；宿主已在窗口 `begin/end` 内调用，**只画内容**，不要自己 `begin` 同名窗口 |
-| `visible` | 默认 `False`；扩展启用时宿主会把该扩展窗口重新置为可见 |
+| `visible` | 默认 `False`；state 文件里有记录时以记录为准（见下方“可见性持久化”） |
 | `flags` | `imgui.WindowFlags`；`None` = 默认 |
 | `close_policy` | 窗口 X 的语义，见下表 |
+| `show_on_enable` | 首次出现（从未记录过意图）时是否自动打开。主面板 `True`，附属/管理窗口设 `False`。builtin 忽略此项 |
+
+**可见性持久化（2026-11-13）**：`ExtensionPanel.visible` 是唯一的落盘点 —— 菜单点击 /
+View 菜单 / `ui.panel` op / 用户点 X 都会写进 `extensions.json` 的 `panels` 段（按**窗口名**）。
+所以“用户上次关掉的面板”重启后仍然是关的。不需要、也不要自己记住可见性。
 
 | `close_policy` | X 的语义 | 适用 |
 |---|---|---|
-| `"hide"`（默认） | 只隐藏，扩展继续运行 | 可选辅助视图 |
-| `"disable"` | 请求停用扩展，Extensions 菜单勾选同步消失 | 面板就是扩展主界面 |
+| `"hide"`（默认） | 只隐藏，扩展继续运行（隐藏会被记住） | 可选辅助视图 |
+| `"disable"` | 请求停用扩展，整个条目从 Extensions 菜单消失 | 面板就是扩展主界面 |
 | `"custom"` | 只派发 `on_ui_event`，由扩展自行决策 | 多窗口联动 |
 
 `on_ui_event` 当前事件：`"closed"`（用户关闭窗口）。`close_policy="disable"` 的停用请求走
@@ -136,7 +141,7 @@ with headless_imgui() as h:
 |---|---|
 | `window name already registered` | 面板名与内置或其他扩展冲突；换唯一名称 |
 | 扩展加载为 `broken` | 声明 `ui` 但未继承 `UIExtensionBase` / 未实现 `on_ui_event` |
-| 点击 X 后菜单还勾选 | `close_policy` 不是 `"disable"`；或扩展未清理自己的停用请求 |
+| 点击 X 后菜单还勾选 | 不可能是 bug：菜单勾选读的就是面板可见性（2026-11-13 起）。若勾选摆着而看不到窗口，先看是否被 dock 到后台标签页 |
 | 面板每帧报错后消失 | 绘制异常被隔离；看控制台 traceback，修复后 Rescan |
 | 后台线程更新 UI 崩溃 | 改为快照/队列；不要从后台线程调 ImGui |
 | 测试后仓库多出 `imgui.ini` | 裸上下文导致；改用 `headless_imgui()` |

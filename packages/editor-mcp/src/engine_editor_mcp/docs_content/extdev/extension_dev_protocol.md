@@ -163,8 +163,8 @@ engine-editor-cli call ext.mything.info                # 扩展 op 直接可调�
 
 | 入口 | 显示什么 | 用途 |
 |---|---|---|
-| 主菜单栏 **Extensions** | **只有 `has_ui` 的扩展**（`capabilities` 含 `ui`，或确实注册了面板） | 叫回面板；非 builtin 扩展仍带勾选框 = 启停 |
-| **Settings ▸ Extensions**（`order=20`） | **全部扩展**（含无面板的后台扩展、broken、planned） | 唯一的管理面：启停、诊断（目录/scope/capabilities/解释器/示例根/已注册 op/错误原因） |
+| 主菜单栏 **Extensions** | **只有 `has_ui` 的扩展**（`capabilities` 含 `ui`，或确实注册了面板） | **面板开关**：勾选 = 该扩展至少一个窗口可见（点击 = 显示/隐藏，不改变启停） |
+| **Settings ▸ Extensions**（`order=20`） | **全部扩展**（含无面板的后台扩展、broken、planned） | 唯一的管理面：启停、**面板显隐**、诊断（目录/scope/capabilities/解释器/示例根/已注册 op/错误原因） |
 
 > 无面板扩展（`ops` / `nodes` / `examples` / `device` 类）**不会**出现在主菜单栏 —— 这是有意的，
 > 否则菜单会被一堆"点了没反应"的条目填满。它们的开关在设置页。
@@ -183,6 +183,9 @@ engine-editor-cli call ext.mything.info                # 扩展 op 直接可调�
    灰字 `"<扩展> — N 个示例（扩展未启用）"`，点一下就地启用。
 3. 菜单里"看不到我的扩展"现在有明确答案：**没面板就不在菜单里**，去 Settings ▸ Extensions 找。
 4. `extension.enable id=<builtin>` 仍然可用，但语义变成"确保已装载 + 显示它的面板"，不写状态文件。
+5. **菜单勾选 ≠ 扩展启用**（2026-11-13 起）：勾选只表示面板可见。以前两者共用同一个勾选框，
+   于是出现"菜单勾着、界面上却看不到面板"的假象（扩展是启用的，只是窗口被隐藏了）。
+   现在的关系是单向的：启用 → 可以显示面板；隐藏面板 → 仍然启用。
 
 ## 4. manifest 参考（extension.json）
 
@@ -203,6 +206,10 @@ engine-editor-cli call ext.mything.info                # 扩展 op 直接可调�
 `enabled`（已装载）· `broken`（manifest/加载错误 — 原因在 `error` 字段）。
 另有三个入口相关字段：`scope`（`builtin` / `local` / `user`）、`always_on`（仅 builtin 恒激活，§3.3）、
 `has_ui`（决定是否出现在主菜单栏 Extensions）。
+
+视图字段（2026-11-13 起）：`panel_visible`（bool — 该扩展当前是否至少有一个窗口可见，即菜单勾选态）
+与 `panel_state`（`{<窗口名>: {visible, intent}}` — 逐窗口事实 + 已持久化的意图，`intent=null`
+表示从未记录）。想诊断"勾着但看不见"、或确认用户上次是不是自己关掉的，看这两个字段。
 
 ## 5. 生命周期契约
 
@@ -396,9 +403,38 @@ SettingsPanel.register_page(SettingsPage(
 
 | 策略 | 窗口 X 的语义 | 适用场景 |
 |---|---|---|
-| `"hide"`（默认） | 仅隐藏; 扩展继续运行（再次启用会重置可见 — 宿主保证） | 可选视图侧窗 |
-| `"disable"` | **关闭 = 请求停用扩展 → 设置页勾选同步消失（闭环）** | 单主面板扩展（面板即扩展界面本体） |
+| `"hide"`（默认） | 仅隐藏; 扩展继续运行（**隐藏会被记住, 下次启动仍隐藏**） | 可选视图侧窗 |
+| `"disable"` | **关闭 = 请求停用扩展 → 整个条目从 Extensions 菜单消失, 设置页勾选同步取消（闭环）** | 单主面板扩展（面板即扩展界面本体） |
 | `"custom"` | 仅派发事件, 由扩展全权决策 | 复杂多窗联动 |
+
+**面板可见性的持久化（2026-11-13 — 单一咽喉）**:
+
+`ExtensionPanel.visible` 的 setter 是宿主唯一的落盘点：菜单点击、View 菜单、`ui.panel` op、
+用户点 X、dock 分离 —— 无论哪条路径，写入都经过它，并同步写
+`%APPDATA%/FlyVibingEngine/editor_state/extensions.json` 的 `panels` 段（**按窗口名**，
+不是扩展 id —— 一个扩展可以有多个窗口，各自独立恢复）：
+
+```json
+{ "version": 2,
+  "enabled": { "gtec": true },
+  "python":  {},
+  "panels":  { "Gtec Monitor": true, "Device Manager": false } }
+```
+
+恢复规则（`scan()` 激活后按窗口逐个执行）：
+
+| `panels[<窗口名>]` | 结果 |
+|---|---|
+| `true` | 打开 |
+| `false` | 保持隐藏（**用户关过就是关的**，重启也不会自己弹回来） |
+| 缺省（从未记录） | 非 builtin 且注册时 `show_on_enable=True` → 自动打开一次并记录；否则保持隐藏 |
+
+> 为什么 builtin 不参与"首次自动打开"：builtin 恒激活，"第一次扫到"与"用户半年前关掉了"
+> 在状态文件里长得一样；自动弹窗还会挤掉 e2e 的默认布局。用户想开就点一次菜单。
+>
+> 老状态文件没有 `panels` 段 = 全部按"从未记录"处理，向后兼容。
+> 文件按 `utf-8-sig` 读 —— 记事本存盘会加 BOM，用纯 `utf-8` 读会整份解析失败并**静默回落默认值
+> （= 扩展开关全丢）**，这是 2026-11-13 实测踩到的坑。
 
 > builtin 扩展（allowlist 内）不可停用，`close_policy="disable"` 对它退化为
 > `"hide"`（窗口 X 只隐藏）；需要「关掉就不再见」的语义请把扩展装到用户目录。
