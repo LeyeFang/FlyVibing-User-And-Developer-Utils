@@ -253,6 +253,43 @@ vd = module("VirtualDevice")         # 需要多个函数时（None = 未安装�
 AST 扫描 `Core/**` + `Runtime/**` + 两个入口，任何 `Application.Functions` 引用都 FAIL；
 同时锁定三条语义（缺席不抛 / required 上抛 / 只告警）。
 
+### 9.1 走完 O9 之后还剩什么（2026-11-14 全量审计）
+
+修完 O9 后做了一次"还有没有同类问题"的复查。结论：**还有，但形态不同**，分四类：
+
+| 类 | 形态 | 状态 |
+|---|---|---|
+| A | 运行时启动/收尾硬 import 扩展 | **已清零**（接缝 + 守卫 §9） |
+| B | 扩展的**实现**住在 core（`Core/DeviceRegistry.py`，183 行别名台账） | **已迁移**：实现归 `SerialParallelDevice/device_registry.py`，core 只留能力凭据 `Core/DeviceAliases.py` |
+| C | core/编辑器**知道扩展节点类型名**（约束 / 卡片控件 / 布局 / 引脚规则） | **仍有 44 处 / 7 文件**，棘轮登记 |
+| D | 扩展节点语义文档写死在 core（`graph_rules.py`，随每份 `.scene` 分发） | 仍有 |
+
+C 类的分布（AST 统计，文档字符串不算）：
+
+| 文件 | 引用数 | 归属扩展族 |
+|---|---|---|
+| `Core/NodeGraph/graph_constraints.py` | 19 | 设备池 / SigGen / Epoch / BCI |
+| `Editor/.../group_layout.py` | 7 | SigGen + Serial/Parallel |
+| `Editor/.../widgets/device_siggen.py` | 5 | SigGen |
+| `Editor/.../widgets/epoch.py` | 5 | Epoch |
+| `Editor/.../widgets/algorithm.py` | 4 | BCI |
+| `Editor/.../widgets/device_pool.py` | 3 | 设备池 |
+| `Editor/.../visible_pins.py` | 1 | Serial/Parallel |
+
+**为什么 C 类不能"一口气"搬**：pack 现在只能声明 `pins/fields/evaluator/menu`，
+没有位置说"我的引脚何时隐藏 / 我的 Init⇄Kill 必须配对 / 我的卡片要什么控件 /
+我的文档段是什么"。搬它需要先设计 **pack 扩展点**（`pin_visibility` / `constraints` /
+`widget` / `docs`），再让四个扩展族各自迁移 —— 那是独立工程，不是收尾。
+
+**棘轮守卫**：`Test/Application/Core/test_extension_coupling_inventory.py` ——
+登记上表基线，**只许减少**：任何新文件、或某文件计数变大 → FAIL；计数变小则提示
+把基线改小。这样债务可以逐步还，但不会悄悄长回来。
+
+**同类残留的顺手修复**：`LiveCommandServer._op_device_save`（`op` 在扩展缺席时抛
+`ImportError` → 现在返回 `extension_unavailable`）、`widgets/epoch.py`（直接 import BCI
+扩展 → 走接缝）。
+
+
 
 ---
 

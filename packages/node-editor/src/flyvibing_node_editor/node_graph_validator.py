@@ -532,11 +532,15 @@ def _check_device_aliases(nodes: dict) -> list[dict]:
                 refs.append((str(nid_str), str(key), value))
     if not refs:
         return out
-    try:
-        from Application.Core.DeviceRegistry import describe, get, parse_ref
-    except Exception as e:  # noqa: BLE001 — 无注册表环境不阻塞校验
+    # 别名能力由**扩展**提供（核心只做凭据，见 Application/Core/DeviceAliases.py）。
+    # 离线校验器不启用扩展 → 没有提供者 → 只能给出"检查不可用"的告警。
+    from Application.Core import DeviceAliases as _aliases
+
+    if not _aliases.available():
         return [_entry("warning", "device_alias_check_unavailable",
-                       f"device alias check skipped: {e}")]
+                       "device alias check skipped: no installed extension provides "
+                       "device aliases (install/enable the serial device extension)")]
+    describe, get, parse_ref = _aliases.describe, _aliases.get, _aliases.parse_ref
     for nid_str, key, value in refs:
         name = parse_ref(value)
         if get(name) is None:

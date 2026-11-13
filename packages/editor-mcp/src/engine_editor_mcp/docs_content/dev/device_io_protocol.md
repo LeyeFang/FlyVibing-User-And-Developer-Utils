@@ -268,8 +268,16 @@ encode(14,   "string", prefix="20,", suffix=";")   # b'20,14;\n'
 | L1 逻辑设备名 | 场景节点 `props.port = "@mibox"` | 与机器无关的**实验设计** | 场景作者（写一次，跨机器不变） |
 | L2 物理端点 | `%APPDATA%/MyGameEngine/devices.json`（`MGE_DEVICES_FILE` 可覆盖 — 测试沙箱） | 本机上 `@mibox` **当前**是哪个 `COMx@baud` | 每台机器绑一次（面板 / agent） |
 
-- 注册表实现: `Application/Core/DeviceRegistry.py` —— 原子写（tmp+replace）、线程锁、损坏文件
-  容错为空表；名称 `^[A-Za-z][A-Za-z0-9_.-]{0,31}$`；字段 `transport/port/baud/updated/hint`。
+- 注册表实现: **归扩展** `SerialParallelDevice/device_registry.py` —— 原子写（tmp+replace）、
+  线程锁、损坏文件容错为空表；名称 `^[A-Za-z][A-Za-z0-9_.-]{0,31}$`；字段
+  `transport/port/baud/updated/hint`。
+- 核心侧只有**能力凭据** `Application/Core/DeviceAliases.py`（2026-11-14 起）：
+  `register/unregister` + 查询（`names/get/describe/parse_ref/is_ref/resolve`），
+  **不含实现**。扩展在模块导入时自注册 → 编辑器端口下拉、离线校验器、`SerialSend`
+  求值器读的是同一份台账；产物里没有该扩展 → `names()` 返回空、`get()` 返回 `None`
+  （编辑器只显示物理端口，校验器给 `device_alias_check_unavailable` 告警）。
+  理由见 `runtime_packaging_protocol` §9（引擎不得硬依赖扩展）：核心曾为一个扩展持
+  有 183 行台账实现。
 - **单一解析点**: `SerialParallelDevice.serial_manager.resolve_port(text)` —— `""` → `ValueError`；
   `@name` → 注册表 → 物理端口；其它 → 原样直通（裸 `COMx` 仍可用，兼容旧场景）。`send` /
   `start_watch` 在**入队前**解析；扩展面板与节点走同一条路径。

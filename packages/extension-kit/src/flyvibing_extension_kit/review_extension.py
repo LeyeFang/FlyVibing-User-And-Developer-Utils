@@ -57,8 +57,9 @@ _IMPORT_ALLOW = (
     "Application.Functions",
     "Application.Core.Events",
     "Application.Core.ThreadRegistry",
-    # 跨机器设备身份（协议 device_io_protocol §12）— 官方示例扩展依赖的公共设施
-    "Application.Core.DeviceRegistry",
+    # 跨机器设备身份（协议 device_io_protocol §12）— 别名**能力凭据**
+    # （实现归扩展；核心只在中间做注册/查询，2026-11-14 起是 DeviceAliases）
+    "Application.Core.DeviceAliases",
 )
 _MONKEY_RE = re.compile(r"^Application\w*(?:\.\w+)*\s*=", re.M)
 _UI_BASE_RE = re.compile(r"class\s+\w+\s*\([^)]*UIExtensionBase")
