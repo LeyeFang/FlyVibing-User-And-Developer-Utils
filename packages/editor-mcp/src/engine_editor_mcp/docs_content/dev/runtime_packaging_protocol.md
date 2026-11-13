@@ -26,6 +26,7 @@
 |---|---|
 | `Application/PlayerEntry.py` | 播放器 CLI：`<game.json\|.myproj\|.scene>` + `--dry-run` + `--frames N`（真实运行 N 帧后自动退出，冒烟用） |
 | `Application/Runtime/PlayerBootstrap.py` | 编排：`prepare_offline`（解析+加载场景）→ `activate_resources`（材料+重映射）→ `dry_run`（无头校验）/ `run`（窗口→init→注入→推层→`GameRuntime.run()`）；含 `_AutoExitLayer` |
+| `Application/Core/Extension/OptionalExtensions.py` | **引擎↔可选扩展的唯一接缝**：`available/module/call/start_io/stop_io/stop_all_io`；缺席=正常，存在但坏掉=硬错误（§9） |
 | `Application/Core/Project/RuntimeProjectLoader.py` | 运行时 .myproj 加载（编辑器零依赖，语义镜像 `ProjectManager`）；**必须在 `ResourceManager.Init` 之后调用 `load_resources`** |
 | `Utils/Dev/collect_wheels.py` | `.venv-py314t` 实况 → `requirements.export.txt`(全量) + `requirements.runtime.txt`(游戏子集) → 逐包下载 → `Resource/wheels/` → 覆盖度核对 + `CHECKSUMS.sha256` |
 | `Utils/Dev/prepare_runtime.py` | uv 3.14t 解释器 → `Resource/runtime/` 镜像 → 按**运行时子集**离线安装 → 瘦身（pdb/test/Doc）→ 冒烟 + 子集断言 |
@@ -197,6 +198,61 @@ _distribute_extension_python → engine: wheelhouse/<ext>/wheels → pip --no-in
 - 生成链：`collect_wheels.py` 写 `requirements.runtime.txt` → `prepare_runtime.py` 按它安装 + `trim_image()` + `check_editor_only()` 断言；
 - 实测（2026-09-28）：镜像 887 → **364 MiB**；整包 1.3 GB → **409 MB**（其中 runtime 324 MB；导出时剔除 `__pycache__`）+ dry-run/窗口 e2e 全绿；
 - ⚠️ 导出包内**不再能运行编辑器**（imgui 不在镜像中）——`wheelhouse/` 保留**全量轮子**与 `requirements.export.txt`，需要“全量/编辑器版”环境时用 wheelhouse 重建即可。
+
+## 9. 引擎不得硬依赖扩展（O9，2026-11-14）
+
+> 这条与 §8 是同一件事的两面：§8 说"扩展的依赖要能进产物"，§9 说"**产物可能根本没有
+> 某个扩展**——引擎不能因此崩掉"。导出按场景节点按需带扩展，所以"不存在"是正常形态，
+> 不是错误。
+
+**规则**：`Application/Core/**` 与 `Application/Runtime/**` **不得**出现
+`from Application.Functions.<扩展> import ...`（模块级、函数级、字符串形式都算）。
+唯一允许的模块是 `Application/Core/Extension/OptionalExtensions.py`。
+
+**事故**（外部扩展报告 O9，实测复现）: `GameRuntime.init/run/stop` 三处裸 import
+`SerialParallelDevice`；一个不用 SPD 节点的场景（纯采集 / 纯展示 / 纯核心）导出的成品里
+没有该目录 →
+
+```
+ModuleNotFoundError: No module named 'Application.Functions.SerialParallelDevice'
+[ERROR] Player exited with an unhandled exception      ← 连窗口都起不来
+```
+
+一直没暴露是因为所有"能跑"的示例都用 `ParallelSend` 打标，SPD 恰好被带上。
+同一批扫描还揪出 `Core/NodeGraph/validation/dry_run.py` 的同类写法（会让
+`--dry-run` 在精简安装里失败）。
+
+**接缝语义（三条，别混）**
+
+| 情形 | 结果 |
+|---|---|
+| 扩展**目录不存在** | 返回 `absent`，打一行 info，**不抛**（正常形态） |
+| 存在，调用成功 | `ok` |
+| 存在，调用失败（端口/服务/依赖） | `required=True` → **抛**；`required=False` → 告警 |
+
+第三条方向是刻意的：设备 I/O 起不来却继续跑实验 = **静默丢刺激**。所以"存在但坏掉"
+是硬错误；"根本不存在"不是。这与 SPD `on_engine_start` 的"失败不吞"契约一致，
+区别只是调用方从扩展换成了引擎接缝——引擎不再需要认识具体扩展名就能启动。
+
+```python
+from Application.Core.Extension.OptionalExtensions import start_io, stop_io, call, module
+
+start_io("runtime")                  # 缺席静默跳过；真实故障上抛
+stop_io("runtime")                   # 关闭路径：失败只告警，绝不阻断退出
+call("VirtualDevice", "close_all")   # 清理兜底
+vd = module("VirtualDevice")         # 需要多个函数时（None = 未安装）
+```
+
+**为什么住在 `Core/Extension/`**：`Core/NodeGraph/validation/dry_run` 也要用；
+放 `Runtime/` 会形成 Core → Runtime 反向依赖。
+
+**判据**：`available()` 看的是**目录**（与导出器的决策单位一致），`find_spec` 仅作
+非目录安装（zip/egg）的兜底。
+
+**守卫**：`Test/Application/Core/test_runtime_optional_extensions.py`（19 checks）——
+AST 扫描 `Core/**` + `Runtime/**` + 两个入口，任何 `Application.Functions` 引用都 FAIL；
+同时锁定三条语义（缺席不抛 / required 上抛 / 只告警）。
+
 
 ---
 
