@@ -591,10 +591,26 @@ def _review_device_aliases(rep: Report, manifest: dict, ext_dir: str) -> None:
         rep.ok("M9", f"device_aliases module={module}" + (f" dir={rel}" if rel else ""))
 
 
+#: 扫描 python 源时**不进入**的目录名。
+#: 虚拟环境（`.venv` / `.venv-gtec` / `venv` / `env`）与依赖目录（`site-packages` /
+#: `node_modules`）里是第三方代码 —— 它们的写死路径/自备解释器与扩展作者无关，
+#: 扫进去只会制造假失败（实测: gtec 把实机用的 `.venv-gtec` 放进扩展目录后，
+#: C12 报的是 cffi / numpy 自己的路径）。
+_VENDOR_DIRS = frozenset({
+    "__pycache__", ".git", ".venv", "venv", "env", "site-packages",
+    "node_modules", ".tox", ".nox", ".mypy_cache", ".pytest_cache",
+})
+
+
+def _is_vendor_dir(name: str) -> bool:
+    low = name.lower()
+    return name in _VENDOR_DIRS or low.startswith(".venv") or low.startswith("venv")
+
+
 def _scan_py_files(ext_dir: str) -> list:
     out = []
     for cur, dirs, files in os.walk(ext_dir):
-        dirs[:] = [d for d in dirs if d not in ("__pycache__", ".git")]
+        dirs[:] = [d for d in dirs if not _is_vendor_dir(d)]
         for name in files:
             if name.endswith(".py"):
                 out.append(os.path.join(cur, name))
