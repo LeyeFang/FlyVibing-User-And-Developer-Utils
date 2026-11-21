@@ -83,6 +83,59 @@ Gtec 把落盘默认格式改成 HDF5（需要 `h5py`）。PIE 里一切正常�
 
 **未知键 = 错误**。拼错 `requires` 不会被静默忽略 —— 这正是本契约存在的意义。
 
+### 2.3 ★ `probe` 要列全"成品里会用到的三方模块"，不只是 `requires`
+
+`requires` 描述"**我要装什么**"，`probe` 描述"**成品运行时必须能 import 什么**"。两者不等长时很容易漏：
+
+```json
+"requires": ["h5py>=3.16"],                 // 只装 h5py
+"probe":    ["h5py", "numpy", "scipy"]      // 但节点求值里还用着 numpy/scipy
+```
+
+numpy / scipy 由基础镜像 `Resource/runtime` 提供，**不需要 `requires`**，但**必须进 `probe`**：
+成品启动只逐个 `import` probe 列表，漏掉的包不会在启动时报，而是在**第一次真正用到它的地方**
+（落盘 / 第一次画图）才 `ModuleNotFoundError`。
+
+> 真实案例（2026-11-17）：某扩展只 probed `h5py`。引擎侧一次导出缺陷让基础镜像的
+> `Lib/site-packages` 整层丢失 → 启动 probe 全绿、导出成功、节点第一次落盘才炸。
+> 若 probe 里有 `numpy`，启动就会打 `[Player] ERROR:` 并直接指名缺哪个模块。
+
+`check_extension_python.py` 的 **D7** 会扫扩展源码里的三方 import，与 probe 对照给出 WARN。
+
+### 2.4 开发期环境怎么建（推荐配方）
+
+推荐形态是**扩展独立持有自己的环境，但以引擎环境为基座** —— 既能装与引擎冲突的版本，
+又不必复制 numpy/scipy 那几百 MB：
+
+```powershell
+# 1) 用引擎的解释器建 venv（不要用系统 python：ABI/版本可能与引擎不一致）
+.\.venv-py314t\Scripts\python.exe -m venv "%APPDATA%\FlyVibingEngine\extensions\<id>\venv"
+
+# 2) （可选）让这个 venv 能看见引擎已装的包 —— 只装增量依赖
+#    Windows 上把引擎 venv 的 site-packages 写进 .pth，比 --system-site-packages 更可控
+"$PWD\.venv-py314t\Lib\site-packages" | Set-Content `
+  "$env:APPDATA\FlyVibingEngine\extensions\<id>\venv\Lib\site-packages\_engine.pth"
+
+# 3) 装你自己的增量依赖
+& "$env:APPDATA\FlyVibingEngine\extensions\<id>\venv\Scripts\python.exe" -m pip install -r requirements.txt
+```
+
+manifest 对应写：
+
+```json
+"python": {
+  "mode": "venv",
+  "path": "%EXT_DATA%/venv",
+  "requirements": "requirements.txt",
+  "probe": ["pygds"],
+  "runtime": { "mode": "engine", "requires": ["h5py>=3.16"], "probe": ["h5py", "numpy"] }
+}
+```
+
+**不要**把 venv 建在扩展源码目录里（`.venv-<id>`）：工具链虽然会把它当第三方目录跳过，
+但它会让扩展目录膨胀数百 MB、被 git/备份整棵搬运、换机后路径失效。`%EXT_DATA%`
+（`%APPDATA%/FlyVibingEngine/extensions/<id>/`）才是协议位置。
+
 ---
 
 ## 3. 两种 mode 的语义差别（不要混）
@@ -229,6 +282,8 @@ python FlyVibing-User-And-Developer-Utils/packages/extension-kit/review_extensio
 | 导出报 "扩展 'x' 随产物分发，但 manifest 没有 python.runtime 段" | 补 `"runtime": {"mode": "none"}` 或真正的 `requires` |
 | 导出报 "wheelhouse 与引擎 venv 都拿不到" | `python Utils/Dev/collect_wheels.py`，或把 wheel 放进 `<扩展>/wheels/` |
 | 成品能开但落盘失败 | 检查启动日志 `[Player] ERROR:`；确认 `requires` 写全、`probe` 名字对 |
+| 启动 probe 全绿，但节点跑到一半报 `ModuleNotFoundError: numpy` | `probe` 漏了"以为基础镜像一定有"的包（§2.3）。把成品会用到的三方 import 全列进 `probe`；`check_extension_python.py` 的 D7 会提示 |
+| 扩展目录几百 MB / git 状态卡 | venv 建在源码目录里了。迁到 `%EXT_DATA%/venv`（§2.4） |
 | 包明明装了却 import 不了 | 名字推导不出来（`pyserial` → `serial`）：显式写 `probe` |
 | 想钉死版本 | `runtime.mode: "bundle"`（整包环境），并把重活放子进程 |
 | 产物忽然大了几百 MB | 有人用了 `bundle`；确认是版本冲突必需，否则换 `engine` |

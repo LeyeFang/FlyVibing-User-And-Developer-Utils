@@ -355,7 +355,9 @@ OPS: dict[str, OpSpec] = {o.name: o for o in [
            example="scope=viewport"),
     # ── frame（内部；agent 侧请用 capture / engine_capture）──
     OpSpec("frame.request", "frame", "请求抓下一渲染帧（内部）",
-           (Param("target", "enum", True, "editor / pie"),), internal=True),
+           (Param("target", "enum", True, "editor / pie"),
+            Param("lease_s", "float", False, "该请求的租约（秒）; 到期未产帧 → fetch 返回 expired")),
+           internal=True),
     OpSpec("frame.fetch", "frame", "取帧（内部；就绪时带二进制尾帧）",
            (Param("target", "enum", True, ""), Param("generation", "int", True, "")), internal=True),
     # ── editor ──
@@ -485,7 +487,9 @@ TOPIC_HELP = {
         "  MCP engine_capture(target) — PNG 落盘 + 图像直回（agent 能看到画面; 适合'看一眼'）\n"
         "  CLI capture [editor|pie]   — 只落盘并回路径（省 token; 图片由用户/工具查看）\n"
         "  目录: <临时目录>/engine_editor_mcp/frames（MGE_MCP_FRAMES_DIR 覆盖; server 启动清空）\n"
-        "  pie 需 PIE 运行中; editor 随时可抓。"
+        "  pie 需 PIE 运行中; editor 随时可抓。\n"
+        "返回点: 最多等 timeout_s（整轮预算）+ 余量就给结论 — 窗口最小化只用 2s 等待窗口，\n"
+        "        引擎租约到期回 expired，绝不无声挂住（详见 editor_live_protocol §4 抓帧返回点纪律）。"
     ),
     "probe": (
         "像素采样（不需要图像通道的断言手段）:\n"
@@ -642,6 +646,8 @@ def call_timeout(op_name: str) -> float:
         return 600.0  # 游戏层复制 runtime 镜像 (数百 MB / 上万文件) — 分钟级
     if op_name in ("graph.export", "graph.import", "graph.validate.report"):
         return 30.0
+    if op_name in ("frame.request", "frame.fetch"):
+        return 3.0   # 即时 op（引擎 pump 上限 2.5s）— 卡住就快速给结论, 不陪等 15s
     return 15.0
 
 

@@ -118,6 +118,7 @@ load_scene_from_file` 以及 `ProjectManager._load_all_scenes` 都必须维护 `
 - **安装包 ≠ 游戏导出**：`Utils/Dev/Installer/build_installer.py` 使用独立的 mainline allowlist `Application/Functions/official_extensions.json`。只有 allowlist 内官方扩展进入安装包；本地/第三方目录（即使未声明 `export:false`）一律排除；官方扩展的 `export:false` 不得在这里“错杀”（该字段只服务游戏导出）。回归：`test_release_layout.py` / `test_extension_boundary.py`；
 - **编辑器本地状态不导出**：`Application/Editor/Config/`（git-ignored 的扩展启用表、PIE/UI 布局、`extensions_data/`）同时从游戏层与安装包 staging 排除，路径记入 manifest；否则安装后会留下本地插件启用痕迹/本机设置（回归：`test_export_game_bundle.py` / `test_release_layout.py`）；
 - **第三方声明**：根目录 `THIRD_PARTY_NOTICES.md` 复制到导出包根目录并列入 manifest `files`；
+- **第三方/工具目录不进包**（2026-11-17 加固）：复制 `Application/` 时按目录名跳过版本控制（`.git`/`.hg`/`.svn`）、虚拟环境（**前缀识别** `.venv*` / `venv*`，含 `.venv-gtec`）、`site-packages`、`node_modules` 与工具缓存（`__pycache__`/`.mypy_cache`/`.pytest_cache`/`.ruff_cache`/`.tox`/`.nox`/`.idea`/`.vscode`）。判定单一来源 `Application/Core/FileSystem/VendorDirs.py`，`print_audit` / `imgui_docgen` 同用；正文回归：`Test/Application/Core/test_vendor_dirs.py`。起因：本地扩展把实机 venv 放进扩展目录（`.venv-gtec`），旧实现只做**精确名**匹配 → 219 MB / 5,434 个文件被打进游戏层；
 ---
 
 ## 5. 开发清单（新增/修改工程与导出行为时）

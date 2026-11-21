@@ -153,6 +153,8 @@ print("created:", ids)   # 只打印需要的信息 → 其余不进入上下文
 | 编辑器未运行（无监听） | 先启动编辑器，不要重试 |
 | 名称重复警告 | 按名取首个匹配；改用 `id` 精确指定 |
 | `capture pie` 报 PIE is not running | 先 `sim.play`，等 `sim.state` = Running |
+| `capture` 报"最小化/还原窗口" | 窗口被最小化时渲染线程不产帧：还原窗口再抓（等待窗口只有 2s，不再盲等） |
+| `capture` 报 `expired` | 引擎侧租约到期（请求 10s 内没被渲染线程消费/发布）：`renderer.snapshot` 看渲染线程是否在产帧 |
 | 端口占用 | Settings ▸ Common ▸ Port / `MGE_EDITOR_MCP_PORT`，或 `launch --port auto`；不要与其它引擎共用默认端口 |
 | `launch` 找不到引擎 | 传 `--engine-root <含 startup.bat 的仓库根>` 或设 `MGE_ENGINE_ROOT` |
 | 多引擎串话 | 每个 agent 用 `launch --port auto` 后固定自己的 `--port N`；`engines` 核对 |

@@ -47,7 +47,8 @@ Engine._render_loop (渲染线程)
 
 - **GL 调用只允许在渲染线程**（该线程持有上下文；`render:` 已注册 ThreadRegistry）。
 - 跨线程唯一通道 = `renderer.enqueue(cmd)`（`CommandQueue` 带锁；任意线程可入队）+
-  `FrameCaptureSlot`（单槽信箱：请求/发布/取回）。
+  `FrameCaptureSlot`（单槽信箱：请求/发布/取回；请求带**租约**，渲染线程不产帧时
+  `fetch` 在租约处返回 `expired` 而不是永远 `pending`）。
 - **原子拍 (atomic beat)**：逻辑线程每个 tick 由 `RuntimeNodeLayer.OnUpdate` 包裹
   `begin_command_batch()` / `end_command_batch()`（try/finally）——该 tick 的全部命令
   **整批入队**，渲染帧边界不会把同一 tick 的多部件显隐/生成切成两帧
@@ -178,7 +179,7 @@ Editor 侧只产纯数据 `overlay_drawable_struct`（含 layout/blend/cull/dept
 | 工具 | 用法 | 说明 |
 |---|---|---|
 | `renderer.snapshot`（op） | `engine-editor-cli call renderer.snapshot` | 后端/GL 信息/vieport/资源计数/overlay 键列表/帧统计（p1 low）；无头 `available=false` |
-| `frame.request`+`frame.fetch`（op，内部） | MCP `engine_capture` 封装 | 抓帧（PNG 直回或落盘） |
+| `frame.request`+`frame.fetch`（op，内部） | MCP `engine_capture` 封装 | 抓帧（PNG 直回或落盘）；**有租约**：请求 10s 内没被渲染线程消费/发布 → `state=expired`（窗口最小化/驱动阻塞时不会无限 pending） |
 | `capture`（CLI） | `engine-editor-cli capture [editor\|pie] --out x.png` | 只落盘省 token |
 | `probe`（CLI） | `engine-editor-cli probe editor --points 160:120;800:450` | **裸帧像素采样**（无 PNG 编解码）→ JSON `[{x,y,rgba}]`；顶左坐标系 |
 

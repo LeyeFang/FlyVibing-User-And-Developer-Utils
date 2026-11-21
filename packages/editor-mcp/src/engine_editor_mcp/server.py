@@ -36,6 +36,7 @@ Engine Editor Live MCP — 运行中编辑器的热注入工具（v0.5.0: 双档
 dev 仓库内等价入口: python Utils\\ExtDev\\EditorMcp\\mcp_server.py （薄 shim, 同一源码）
 """
 
+import asyncio
 import io
 import json
 import os
@@ -86,6 +87,38 @@ _encode_and_save = encode_and_save
 
 def _port() -> int:
     return editor_port()
+
+
+# ── 阻塞调用的返回点纪律（2026-11-16）─────────────────────────
+# FastMCP 对同步工具是**在事件循环里直接调用**的：一次卡住的抓帧/op 会把整个
+# stdio 服务器冻住（别的工具、甚至协议层 ping 都排不上队），agent 会话表现为
+# "工具不给结果"。所以所有可能阻塞的工具都改为: 丢到 worker 线程 + 硬超时。
+
+
+class _DeadlineExceeded(RuntimeError):
+    """worker 线程超过预算仍未返回 — 放弃等待，把结论交还给调用方。"""
+
+
+async def _offload(fn, budget: float, *args, **kwargs):
+    """在 worker 线程执行阻塞调用，最多等 budget 秒。"""
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(fn, *args, **kwargs), timeout=max(0.5, float(budget))
+        )
+    except asyncio.TimeoutError as exc:
+        raise _DeadlineExceeded(f"{getattr(fn, '__name__', 'call')} 超过 {budget:g}s 未返回") from exc
+
+
+def _batch_budget(calls: list) -> float:
+    """批量预算 = 各 op 超时之和 + 余量（封顶 20 分钟）。"""
+    total = 5.0
+    for call in calls or []:
+        try:
+            name = str(call.get("op", "")) if isinstance(call, dict) else str(call[0])
+        except Exception:  # noqa: BLE001 — 形状错就让执行体自己报错
+            continue
+        total += op_registry.call_timeout(op_registry.resolve(name)[0] or name)
+    return min(total, 1200.0)
 
 
 def _wipe_frames_dir() -> None:
@@ -270,7 +303,7 @@ def _validate_orchestrate(
 
 
 @mcp.tool()
-def editor_graph_validate(
+async def editor_graph_validate(
     source: str = "canvas",
     graph: dict | None = None,
     frames: int = 360,
@@ -293,7 +326,11 @@ def editor_graph_validate(
         {found, report: {ok, state, counts, static, runtime, log: [...], graph}, saved_path?}
         或 {"error": ...}（引擎未运行）
     """
-    result = _validate_orchestrate(source, graph, frames, verbose, seed, save_path, timeout_s)
+    try:
+        result = await _offload(_validate_orchestrate, timeout_s + 30.0, source, graph, frames,
+                                verbose, seed, save_path, timeout_s)
+    except _DeadlineExceeded as e:
+        return {"error": str(e), "error_code": "timeout"}
     if "error" in result or not isinstance(result.get("report"), dict):
         return result
     result = dict(result)
@@ -326,7 +363,7 @@ def editor_graph_validate_cancel(task_id: int | None = None) -> dict:
 
 
 @mcp.tool()
-def editor_graph_export(path: str | None = None, include_rules: bool = True) -> dict:
+async def editor_graph_export(path: str | None = None, include_rules: bool = True) -> dict:
     """导出当前画布节点图 JSON（含 _rules 规则文档; path 给了同时落盘 .json）。
 
     Returns: {nodes, links, saved_path, graph: {...}}
@@ -334,11 +371,14 @@ def editor_graph_export(path: str | None = None, include_rules: bool = True) -> 
     args: dict = {"include_rules": include_rules}
     if path:
         args["path"] = path
-    return _send("graph.export", args, timeout=30.0)
+    try:
+        return await _offload(_send, 35.0, "graph.export", args, 30.0)
+    except _DeadlineExceeded as e:
+        return {"error": str(e), "error_code": "timeout"}
 
 
 @mcp.tool()
-def editor_graph_import(graph: dict | None = None, path: str | None = None, validate_first: bool = True) -> dict:
+async def editor_graph_import(graph: dict | None = None, path: str | None = None, validate_first: bool = True) -> dict:
     """导入节点图替换当前画布（先静态检查, 有 error 拒绝; 强制导入传 validate_first=False）。
 
     Args:
@@ -349,16 +389,22 @@ def editor_graph_import(graph: dict | None = None, path: str | None = None, vali
         args["graph"] = graph
     if path:
         args["path"] = path
-    return _send("graph.import", args, timeout=30.0)
+    try:
+        return await _offload(_send, 35.0, "graph.import", args, 30.0)
+    except _DeadlineExceeded as e:
+        return {"error": str(e), "error_code": "timeout"}
 
 
 @mcp.tool()
-def editor_project_open(path: str) -> dict:
+async def editor_project_open(path: str) -> dict:
     """打开 .myproj 工程（等同 File ▸ Open Project — 资源+场景全加载, 启动场景激活）。
 
     Returns: {opened, name, path, scenes, active}
     """
-    return _send("project.open", {"path": path}, timeout=60.0)
+    try:
+        return await _offload(_send, 65.0, "project.open", {"path": path}, 60.0)
+    except _DeadlineExceeded as e:
+        return {"error": str(e), "error_code": "timeout"}
 
 
 # ════════════════════════════════════════════════════════════════
@@ -607,10 +653,11 @@ def editor_resource_material_get(material_id: int | None = None, name: str | Non
 
 
 @mcp.tool()
-def editor_capture(target: str = "editor", timeout_s: float = 6.0):
+async def editor_capture(target: str = "editor", timeout_s: float = 6.0):
     """抓取窗口帧图像 → PNG 存 <临时目录>/engine_editor_mcp/frames/ 并返回画面。
 
     引擎侧只做 glReadPixels（渲染线程帧末）; PNG 编码在本进程（不阻塞引擎）。
+    整条链路有硬预算：无论引擎/窗口处于什么状态都会返回结论（成功或明确错误）。
 
     Args:
         target: "editor"（编辑器窗口）或 "pie"（运行时窗口, 需 PIE 运行中）
@@ -619,8 +666,8 @@ def editor_capture(target: str = "editor", timeout_s: float = 6.0):
         [图像内容块, 说明文本（含文件路径/尺寸）] — agent 可直接查看画面。
     """
     try:
-        path, png_bytes = _capture_png(target, timeout_s)
-    except RuntimeError as e:
+        path, png_bytes = await _offload(_capture_png, timeout_s + 5.0, target, timeout_s)
+    except (_DeadlineExceeded, RuntimeError) as e:
         raise ValueError(f"capture failed: {e}") from e
     return [Image(data=png_bytes, format="png"), f"saved: {path}"]
 
@@ -719,7 +766,7 @@ def engine_help(op: str = "") -> str:
 
 
 @mcp.tool()
-def engine_call(op: str, args: dict | None = None, detail: str = "auto") -> dict:
+async def engine_call(op: str, args: dict | None = None, detail: str = "auto") -> dict:
     """执行一个编辑器 op（名字见 engine_help()）; 兼容旧工具名（editor_run_pie 等）。detail='full' 关闭自动瘦身。"""
     name, defaults = op_registry.resolve(op)
     if not name:
@@ -727,23 +774,34 @@ def engine_call(op: str, args: dict | None = None, detail: str = "auto") -> dict
     call_args = dict(defaults)
     call_args.update(args or {})
     call_args = op_registry.prepare_args(name, call_args)
-    result = _send(name, call_args, timeout=op_registry.call_timeout(name))
-    unknown = op_registry.unknown_args(name, call_args)
-    if unknown and isinstance(result, dict) and "error" not in result:
-        result = dict(result)
-        result["_unknown_args"] = unknown
+
+    def _do() -> dict:
+        result = _send(name, call_args, timeout=op_registry.call_timeout(name))
+        unknown = op_registry.unknown_args(name, call_args)
+        if unknown and isinstance(result, dict) and "error" not in result:
+            result = dict(result)
+            result["_unknown_args"] = unknown
+        return result
+
+    try:
+        result = await _offload(_do, op_registry.call_timeout(name) + 5.0)
+    except _DeadlineExceeded as e:
+        return {"error": f"{name}: {e}", "error_code": "timeout"}
     return op_registry.trim_result(name, result, detail)
 
 
 @mcp.tool()
-def engine_batch(calls: list[dict], continue_on_error: bool = False) -> dict:
+async def engine_batch(calls: list[dict], continue_on_error: bool = False) -> dict:
     """一次调用顺序执行多个 op（省往返）: calls=[{"op": "entity.add", "args": {...}}, ...]。出错默认中断。"""
-    results = execute_calls(calls, continue_on_error)
+    try:
+        results = await _offload(execute_calls, _batch_budget(calls), calls, continue_on_error)
+    except _DeadlineExceeded as e:
+        return {"error": str(e), "error_code": "timeout", "results": []}
     return {"count": len(results), "results": results}
 
 
 @mcp.tool()
-def engine_validate_graph(
+async def engine_validate_graph(
     source: str = "canvas",
     graph: dict | None = None,
     frames: int = 360,
@@ -754,7 +812,11 @@ def engine_validate_graph(
     timeout_s: float = 120.0,
 ) -> dict:
     """干跑校验节点图（静态 + fake-time 模拟; 需引擎运行中）。detail='summary'（默认）省 token; 'full' 完整报告。"""
-    result = _validate_orchestrate(source, graph, frames, verbose, seed, save_path, timeout_s)
+    try:
+        result = await _offload(_validate_orchestrate, timeout_s + 30.0, source, graph, frames,
+                                verbose, seed, save_path, timeout_s)
+    except _DeadlineExceeded as e:
+        return {"error": str(e), "error_code": "timeout"}
     if "error" in result:
         return result
     report = result.get("report")
@@ -768,17 +830,20 @@ def engine_validate_graph(
 
 
 @mcp.tool()
-def engine_capture(target: str = "editor", timeout_s: float = 6.0):
-    """抓取窗口帧图像 → PNG 落盘 + 图像直回（agent 可直接看到画面）。target: "editor" / "pie"。"""
+async def engine_capture(target: str = "editor", timeout_s: float = 6.0):
+    """抓取窗口帧图像 → PNG 落盘 + 图像直回（agent 可直接看到画面）。target: "editor" / "pie"。
+
+    有硬预算：窗口最小化/引擎阻塞时会在几秒内返回明确错误，不会挂住整个会话。
+    """
     try:
-        path, png_bytes = _capture_png(target, timeout_s)
-    except EngineError as e:
+        path, png_bytes = await _offload(_capture_png, timeout_s + 5.0, target, timeout_s)
+    except (_DeadlineExceeded, EngineError) as e:
         raise ValueError(f"capture failed: {e}") from e
     return [Image(data=png_bytes, format="png"), f"saved: {path}"]
 
 
 @mcp.tool()
-def engine_launch(
+async def engine_launch(
     engine_root: str | None = None,
     port: str | int = "auto",
     language: str | None = None,
@@ -806,13 +871,16 @@ def engine_launch(
     if unknown:
         return {"ok": False, "error": "bad_describe", "detail": f"unknown keys: {unknown}"}
     try:
-        result = launch_engine(engine_root, port, language, settings, timeout_s, **meta)
+        result = await _offload(launch_engine, timeout_s + 30.0, engine_root, port, language,
+                                settings, timeout_s, **meta)
     except LaunchError as e:
         try:
             payload = json.loads(str(e))
         except ValueError:
             payload = {"ok": False, "error": str(e)}
         return payload
+    except _DeadlineExceeded as e:
+        return {"ok": False, "error": "timeout", "detail": str(e)}
     os.environ["MGE_EDITOR_MCP_PORT"] = str(result["port"])
     return result
 

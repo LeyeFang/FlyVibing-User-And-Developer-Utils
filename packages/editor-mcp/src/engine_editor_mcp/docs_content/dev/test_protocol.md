@@ -67,6 +67,34 @@ SUMMARY: 11/12 passed in 84s | failed: test_x | tier=core | skipped=5 | runs: Te
 - `--changed` 只命中文档/配置改动 → 0 tests、退出码 0（如实打印）；显式 `--affected` 给错路径 → 退出码 2。
 - 完整 `--tier core` / `--tier gui` 只作提交前门禁，不是每次改动后的默认动作。
 
+### 2.1 并行（2026-11-17 起默认开启）
+
+`--tier core` 全量实测 **286s → 87–91s**（16 核，`-j auto = min(8, CPU)`）。机制：每个测试本来就是
+独立子进程 + 独立 `MGE_TEST_TMP`，并行不改语义。
+
+| 开关 | 说明 |
+|---|---|
+| `-j auto`（默认） | `min(8, os.cpu_count())`；测试数 <4 时自动退化串行 |
+| `-j 1` | 串行（排障 / 复现计时问题时的基线） |
+| `-j N` | 指定并行度；`MGE_TEST_JOBS` 环境变量同效 |
+| `--fail-fast` | 首个失败后不再启动新测试（已跑的会完成） |
+
+**独占资源用标记声明，不要靠"记得别并行跑"**：
+
+```python
+# SERIAL: gl        ← 每个独立 GL 上下文（隐藏窗），并行会抢驱动
+# SERIAL: port      ← 真实端口/端口台账（机器级共享）
+# SERIAL: timing    ← 计时断言 / 忙等校准 / 线程争用敏感
+# SERIAL: global    ← 其它机器级单例
+```
+
+写在文件头 **40 行内**（`# SERIAL: <标签>`）。带标记的测试在并行批次**之后**单独串行跑，
+`--list` 会显示 `[SERIAL:tag]`。当前 11 个：GL 3 个、计时 7 个、端口 1 个。
+
+**判据**：测试的断言若依赖"固定 sleep 后某线程已推进 N 步"，那是假并行问题不是真冲突 ——
+改成有界轮询（`_wait_until(pred, timeout)`，见 `test_serial_parallel_device.py`），不要加 SERIAL。
+只有**必须独占硬件/端口**时才标 SERIAL。
+
 ## 3. 输出契约（每个测试必须遵守）
 
 1. **最后一行**输出：`RESULT: OK (n)` 或 `RESULT: FAIL (k): <名字列表>` 或 `RESULT: <m>/<n> passed, <k> failed`（运行器据此判定; 缺失或格式未识别时按退出码判定并打 `[no RESULT line]`/`unrecognized RESULT format` 标记）。
@@ -80,6 +108,7 @@ SUMMARY: 11/12 passed in 84s | failed: test_x | tier=core | skipped=5 | runs: Te
 |---|---|
 | 一进程一测试 | 运行器永远子进程执行; 测试不得依赖执行顺序、不得假设前一个测试的残留状态 |
 | 沙箱目录 | 用 `os.environ.get("MGE_TEST_TMP")` 作为写盘根（运行器已按测试创建）; 禁止写仓库路径（示例: 不要往 `Test/Application/Editor/` 落 `imgui.ini` 之类产物） |
+| 树遍历 | 扫 `Application/` / `Application/Functions/` 必须走 `Test/Helpers/tree.py::iter_py`（或至少 `is_vendor_dir(d)` 过滤）。本地扩展常把实机 venv 放进自己的目录（`.venv-<ext>`，实测 2,050 个 py 文件），裸 walk 会去解析第三方源码 —— 两个测试因此从 0.8s 涨到 33.6s。守卫：`test_vendor_dirs.py` §4（新增裸 walk 立即 FAIL） |
 | 全局单例清理 | 涉及下列全局态时，测试开头/结尾显式复位（能 `finally` 就 `finally`）:<br>· `ControllerRegistry.reset()`（Mock 注入后必须）<br>· 设备池 / epoch 数据集 / 模型注册表: `reset_pools()` / `reset_all()` / 注册表 reset<br>· 画布/场景: 用局部 `NodeCanvas()`; 需要 `EditorHost.scene` 时用 `_ui_boot`（最小引导） |
 | imgui 持久化 | 任何 imgui 测试必须 `io.set_ini_filename("")`（`_ui_boot` 已内置）——禁止生成/依赖 `imgui.ini` |
 | 端口/句柄 | 服务测试用 ephemeral 端口（`port=0` + 读回）; 启动的进程/窗口必须关闭（`finally`） |

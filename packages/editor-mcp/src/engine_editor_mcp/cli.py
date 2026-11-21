@@ -304,11 +304,14 @@ def cmd_capture(ns) -> int:
         shutil.copyfile(path, abs_out)
         out_path = abs_out
     result = {"saved": out_path, "bytes": len(png_bytes), "frames_dir": str(Path(path).parent),
-              "blank": bool(frame.get("blank"))}
+              "blank": bool(frame.get("blank")),
+              "window_state": frame.get("window_state") or "unknown"}
     _out(result)
     if result["blank"]:
+        hint = "（窗口已最小化 — 还原窗口后重试）" if result["window_state"] == "iconified" else ""
         sys.stderr.write(
-            "capture: 整帧全透明 — 目标窗口可能还没画首帧/被最小化或遮挡（PNG 已落盘但无内容）。\n")
+            f"capture: 整帧全透明 — 目标窗口可能还没画首帧/被最小化或遮挡{hint}"
+            "（PNG 已落盘但无内容）。\n")
     return 0
 
 

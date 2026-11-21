@@ -229,7 +229,7 @@ so concurrent agents avoid the same port and the same project directory.
 | `graph.link` | `editor_graph_link` | `{"from": {node,pin}, "to": {node,pin}}` | 画布拖线 | `{link_id}` |
 | `graph.set_props` | `editor_graph_set_props` | `{"node", "props"}` | 内联控件改属性 | `{node_id, props}` |
 | `graph.set_description` | — | `{"node", "description"?}` | 节点卡 Description 编辑区（省略=读；空串=清除） | `{node_id, description}` |
-| `frame.request` | （`editor_capture` 内部） | `{"target": "editor"\|"pie"}` | 请求抓“下一渲染帧”（立即返回） | `{target, generation}` |
+| `frame.request` | （`editor_capture` 内部） | `{"target": "editor"\|"pie", "lease_s"?}` | 请求抓“下一渲染帧”（立即返回） | `{target, generation, window_state, framebuffer}` |
 | `frame.fetch` | （`editor_capture` 内部） | `{"target", "generation"}` | 取帧; 就绪时行后跟二进制尾随帧 | `{ready, state, width, height, ..., binary_bytes}` |
 | `editor.quit` | `editor_quit` | — | 点窗口 **X**（GLFW 正常关闭; 无窗口回退 `run_state=False`） | `{closing, via}` |
 
@@ -237,10 +237,25 @@ so concurrent agents avoid the same port and the same project directory.
 - **一切 op 复用编辑器现有 API**（不绕过控制器直接改状态），保证与人工操作行为一致；
 - `view.set_mode` 会**写 `scene.game_type`**（与 Scene Type 按钮一致）——`2d` 时 PIE 启动选用 `DefaultCamera2D`（俯视正交）；
 - 抓帧管线（`frame.*`）：主线程 pump 登记请求 → **目标引擎渲染线程**帧末 `glReadPixels`（SwapBuffer 前）
-  → 单槽发布（generation 语义: ready / superseded / pending / error）→ 主线程 `fetch` 取回；
+  → 单槽发布（generation 语义: ready / superseded / pending / **expired** / error）→ 主线程 `fetch` 取回；
   主线程不等待、渲染线程不编码 —— PNG 编码在 MCP 进程（§5）；
 - `graph.*` 直接操作 Node Editor 画布（PIE 注入的同一 canvas 实例）；
 - v3 容器 ops（§4.1）与 v2 同一主线程泵机制；容器级缺口单独维护于 §10。
+
+> **抓帧返回点纪律（2026-11-16 — 修"窗口最小化后 MCP 工具卡死"）**
+>
+> 一次抓帧对调用方最多占用 `timeout_s + ~5s`，**绝不再无声挂起**。四层闸门：
+>
+> | 层 | 机制 | 失效时给什么 |
+> |---|---|---|
+> | 客户端单次 | `frame.*` 走 `FRAME_CALL_TIMEOUT=3s`（引擎 pump 上限 2.5s） | 立即报超时，不陪等 15s |
+> | 客户端整轮 | `timeout_s` 是**整轮**预算，不是每次轮询的预算 | 错误里带 `last_state` / `window_state` |
+> | 窗口最小化 | 回执 `window_state=iconified` → 只用 2s 等待窗口 | "先还原窗口再抓帧" |
+> | 引擎租约 | 请求排队/被消费但没发布超过租约（默认 10s, `lease_s` 覆盖）→ `state=expired` | 客户端立即失败，不再轮询 |
+>
+> 兜底：`send_raw` 有看门狗线程（`timeout+1s` 后强制放弃，`error_code=wedged`）；
+> `capture_png` 整链路也有看门狗；MCP 的阻塞工具全部丢到 worker 线程执行 ——
+> **一次卡住的抓帧不会再冻住整个 stdio 事件循环**（那才是"对话被卡死"的真凶）。
 
 ### 4.1 v3 — 实体 / 组件 / 选中 / 场景 / 资源（25 条, 2026-09-28 实机验证）
 
@@ -380,7 +395,8 @@ UI 入口：Node Editor 工具栏 **Validate** 按钮（静态 / 360 帧 / 600 �
 | `launch` 超时但进程还在 | 看返回的 `log_path`；引擎窗口启动慢时增大 `--timeout`，不要重复启动 |
 | `.vscode/mcp.json` 不生效 | 重载 VS Code 窗口；或 Command Palette → `MCP: List Servers` 手动重启 |
 | 某个 server 的工具缺失 / 启动失败 | `.vscode/mcp.json` 的 `command`/`cwd` 指向已搬迁的旧仓库路径（2026-09 实测: node-graph-editor 曾指向 `...\MI-SSSEP\Experiment\MyGameEngine-Python`，该路径已不存在）→ 用 `Test-Path` 核对后更新为当前仓库路径，再重载 VS Code |
-| `editor_capture` 超时 / 一直 pending | PIE 未运行（报 `PIE is not running`）/ 渲染线程卡住；看控制台 `[Live] frame.*` 审计行与 `sim.state` |
+| `editor_capture` 超时 / 一直 pending | 现在**不会无限 pending**：租约到期回 `state=expired`，客户端按 `timeout_s` 整轮预算收口。若报"最小化"→ 还原窗口；否则看控制台 `[Live] frame.*` 审计行与 `renderer.snapshot`（渲染线程是否在产帧） |
+| `engine_capture` 报 `error_code=wedged` | 本进程的 socket 层超过 `timeout+1s` 没返回（系统挂起/驱动阻塞）—— 客户端已放弃等待；重试或改用 CLI `capture` |
 
 ## 8. 测试与验收
 

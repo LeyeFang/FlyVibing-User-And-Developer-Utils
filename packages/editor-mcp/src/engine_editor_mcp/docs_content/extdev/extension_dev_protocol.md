@@ -592,6 +592,13 @@ def register() -> dict:
 
 `path` 支持 `%EXT_DIR%` / `%EXT_DATA%` / `%ENGINE_ROOT%` 变量，**禁止写死机器路径**。
 
+> **不要把自己的 venv 放在扩展源码目录里**（2026-11-17 补充）：`%EXT_DATA%/venv` 才是
+> 协议位置（扩展数据目录，天然不进导出、不进评审）。放在 `Application/Functions/<ext>/.venv-*`
+> 虽然已被工具链识别为"第三方目录"（评审扫描 / 导出复制 / print 与 imgui 统计统统跳过，
+> 见 `Application/Core/FileSystem/VendorDirs.py`），但它仍然会：① 让扩展目录体积膨胀到数百 MB
+> ② 被 `git status` / 备份 / 同步工具整棵搬来搬去 ③ 在换机时因绝对路径失效。判定守卫：
+> `Test/Application/Core/test_vendor_dirs.py`。
+
 **解析优先级**（`ctx.python.explain()` 会说明实际来源）：
 
 ```
@@ -668,6 +675,8 @@ engine-editor-cli call extension.python id=device path=""   # 清除，回落 en
 | `none` | — | 无三方依赖（**也必须显式写**） |
 
 - 未知键 = 错误（拼错 `requires` 不会被静默忽略）；
+- `probe` 要列全**成品会用到的**三方 import（含"以为基础镜像一定有"的 numpy/scipy）——
+  成品启动只 probe 声明过的模块，漏掉的在节点求值时才炸（详见 `extension_dependencies.md` §2.3）；
 - `bundle` 用于"三方包版本/ABI 与引擎冲突"——代价是产物 +几百 MB，**只在必需时用**；
 - `engine` 的包按 `<扩展>/wheels/` → `Resource/wheels/` → 引擎 venv 的顺序解析，全部离线；
 - 成品启动即 probe，缺包打 `[Player] ERROR:`（不再等到第一次落盘）。
