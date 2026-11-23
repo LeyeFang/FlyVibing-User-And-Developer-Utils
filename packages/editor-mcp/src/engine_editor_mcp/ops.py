@@ -1,7 +1,7 @@
 """Op registry — 编辑器 Live op 的单一事实源（CLI / 精简 MCP / 文档生成共用）。
 
 数据来源与责任:
-  - 引擎侧实现: Application/Editor/Services/LiveCommandServer.py `_register_ops()`（75 ops）;
+  - 引擎侧实现: Application/Editor/Services/LiveCommandServer.py `_register_ops()`（82 ops，本表收录 80 个核心 op）;
   - 本注册表是 agent 侧（CLI/MCP/Skill）的唯一元数据来源;
   - 新增 op 时: 引擎侧注册实现 → 本表加条目 → `python -m engine_editor_mcp.docgen` 重生成 ops.md;
   - 完整性由 Test/Application/Editor/test_editor_mcp_package.py 对照引擎源码守卫。
@@ -40,6 +40,30 @@ class OpSpec:
     # 可复制粘贴的真实调用示例（不带 `engine-editor-cli call` 前缀也行）。
     # 不填时由 example_args() 从 params 推一个“能看懂但不一定能跑”的占位示例。
     example: str = ""
+
+
+@dataclass(frozen=True)
+class ToolParam:
+    """full 档旧 MCP 工具的参数（由 OpSpec 派生 + 少量覆盖）。"""
+
+    name: str            # 工具签名里的参数名
+    arg: str             # op 参数名；带 "." 时组装嵌套 dict（如 from.node）
+    annotation: Any      # Python 类型注解（FastMCP 据此生成 JSON Schema）
+    required: bool = False
+    default: Any = None
+    summary: str = ""
+
+
+@dataclass(frozen=True)
+class ToolSpec:
+    """full 档旧 MCP 工具定义 — 名字/参数/转发目标全部来自注册表。"""
+
+    name: str
+    op: str
+    params: tuple[ToolParam, ...] = ()
+    fixed: tuple[tuple[str, Any], ...] = ()
+    summary: str = ""
+
 
 
 CATEGORY_ORDER = [
@@ -277,6 +301,9 @@ OPS: dict[str, OpSpec] = {o.name: o for o in [
            (Param("source", "enum", False, "canvas(默认) / graph"),
             Param("graph", "json", False, "source=graph 时必填"),
             Param("frames", "int", False, "默认 360"),
+            Param("dt", "float", False, "fake-time 步长；默认 1/60"),
+            Param("realtime", "bool", False, "wall-clock 实速（默认 false）"),
+            Param("allow_long", "bool", False, "允许 realtime >10s（默认 false）"),
             Param("seed", "int", False, "默认 0"),
             Param("verbose", "bool", False, "默认 true"))),
     OpSpec("graph.validate.state", "graph", "校验任务状态（task_id 省略=最新）",
@@ -425,6 +452,101 @@ ALIASES: dict[str, tuple[str, dict[str, Any]]] = {
     "editor_quit": ("editor.quit", {}),
 }
 
+# ── full 档旧工具生成（不再手写 45 个 @mcp.tool 包装）──
+# 参数从 OpSpec 派生；这里只声明“工具名 ≠ op 参数名”和 JSON 形状的覆盖。
+# 旧工具名 → op 的映射仍以 ALIASES 为准（engine_call 兼容与文档共用）。
+
+_ENTITY_SCOPED_PREFIXES = ("entity.", "selection.", "component.")
+
+_TOOL_PARAM_RENAMES: dict[tuple[str, str], str] = {
+    ("graph.add", "type"): "node_type",
+    ("graph.set_props", "node"): "node_id",
+    ("graph.set_description", "node"): "node_id",
+    ("resource.material.get", "id"): "material_id",
+}
+
+# 覆盖 op 参数名与工具参数名不同的“实体 id”类参数
+# json kind 的具体类型（None → Any；不覆盖时 schema 只有 {}）
+_JSON_ANNOTATIONS: dict[tuple[str, str], Any] = {
+    ("entity.add", "parent"): int | str,
+    ("entity.reparent", "parent"): int | str,
+    ("entity.delete", "ids"): list[int | str],
+    ("entity.visible", "ids"): list[int | str],
+    ("entity.transform", "position"): list[float],
+    ("entity.transform", "rotation"): list[float],
+    ("entity.transform", "scale"): float | list[float],
+    ("camera.set", "position"): list[float],
+    ("camera.set", "rotation"): list[float],
+    ("graph.add", "props"): dict,
+    ("graph.add", "position"): list[float],
+    ("graph.set_props", "props"): dict,
+    ("graph.import", "graph"): dict,
+    ("component.set", "fields"): dict,
+}
+
+# 旧工具保留了默认值的参数（OpSpec 里是必填/可选的差异）
+_TOOL_DEFAULTS: dict[tuple[str, str], Any] = {
+    ("camera.get", "role"): "3d",
+    ("camera.set", "role"): "3d",
+}
+
+# 旧工具语义不是“单参数直传”的特例（from/to 是嵌套 dict）
+_TOOL_ONLY_PARAMS: dict[str, tuple[ToolParam, ...]] = {
+    "editor_graph_link": (
+        ToolParam("from_node", "from.node", int, True, None, "源节点 id"),
+        ToolParam("from_pin", "from.pin", str, True, None, "源引脚名"),
+        ToolParam("to_node", "to.node", int, True, None, "目标节点 id"),
+        ToolParam("to_pin", "to.pin", str, True, None, "目标引脚名"),
+    ),
+}
+
+_ANNOTATION_BY_KIND: dict[str, Any] = {
+    "str": str, "int": int, "float": float, "bool": bool,
+    "enum": str, "json": Any,
+}
+
+
+def _tool_param(spec: OpSpec, param: Param) -> ToolParam:
+    key = (spec.name, param.name)
+    name = _TOOL_PARAM_RENAMES.get(key)
+    if name is None and param.name == "id" and spec.name.startswith(_ENTITY_SCOPED_PREFIXES):
+        name = "entity_id"
+    annotation = _JSON_ANNOTATIONS.get(key, _ANNOTATION_BY_KIND.get(param.kind, Any))
+    if key in _TOOL_DEFAULTS:
+        return ToolParam(name or param.name, param.name, annotation, False,
+                         _TOOL_DEFAULTS[key], param.summary)
+    if not param.required:
+        annotation = annotation | None
+    return ToolParam(name or param.name, param.name, annotation, param.required,
+                     None, param.summary)
+
+
+def legacy_tool_specs() -> list[ToolSpec]:
+    """full 档旧工具清单（CLI 别名 / MCP 包装共用的单一事实源）。"""
+    tools: list[ToolSpec] = []
+    for name, (op_name, fixed) in ALIASES.items():
+        spec = OPS.get(op_name)
+        if spec is None:
+            continue  # 注册表缺 op 时由包完整性测试报错，这里不生成半成品
+        if name in _TOOL_ONLY_PARAMS:
+            params = _TOOL_ONLY_PARAMS[name]
+        else:
+            params = tuple(_tool_param(spec, p) for p in spec.params
+                           if p.name not in fixed)
+            # Python 签名要求必填参数在前
+            params = tuple(sorted(params, key=lambda p: 0 if p.required else 1))
+        tools.append(ToolSpec(name, op_name, params, tuple(fixed.items()), spec.summary))
+    return tools
+
+
+# 不是单 op 直传、仍手写在 server.py 的旧工具（编排 / 抓帧图像直回）
+LEGACY_SPECIAL_TOOLS: tuple[str, ...] = (
+    "editor_graph_validate",
+    "editor_graph_validate_report",
+    "editor_graph_validate_cancel",
+    "editor_capture",
+)
+
 # 非 op 通道（CLI 子命令）— 只在 `ops` 目录尾部展示，不在命令总线注册表里。
 # 元组 (子命令, 一行说明)；改 CLI 子命令时同步这里（守卫会对照 argparse 校验）。
 CLI_COMMANDS: tuple[tuple[str, str], ...] = (
@@ -440,7 +562,7 @@ CLI_COMMANDS: tuple[tuple[str, str], ...] = (
     ("engines", "扫描端口频段，列出可响应的引擎"),
     ("ports", "端口台账: 谁占了端口 / 目的 / 归属 / 涉及工程（启动前先看）"),
     ("doc", "内置文档（索引→章节→按节读取）"),
-    ("setup", "向工作区安装 skill + mcp.json"),
+    ("setup", "向工作区安装 skill + MCP 配置（--target auto|vscode|claude|cursor|github|codex|generic）"),
 )
 
 # engine_help / CLI `help <topic>` 的主题索引（完整文本按需返回 — 渐进披露）
@@ -461,7 +583,7 @@ TOPIC_HELP = {
         "  engine-editor-cli engines                    # 扫描 8977..9076，列出运行中的编辑器\n"
         "  engine-editor-cli ports                      # 端口台账（谁占了 / 在做什么 / 会碰哪些目录）\n"
         "  engine-editor-cli --port 8977 call ...       # 指定实例（全局 --port 放子命令前）\n"
-        "  engine-editor-cli ops                        # op 目录（尾部也列非 op 子命令）\n"
+        "  engine-editor-cli ops [--json]               # op 目录 / engine-cli/manifest/v1\n"
         "  engine-editor-cli help <op|主题>             # 单 op 详情 / 主题（probe、exitcodes …）\n"
         "  engine-editor-cli call <op> k=v ... [--json '{...}']\n"
         "  engine-editor-cli batch ops.json             # 顺序批处理（- = stdin）\n"
@@ -469,18 +591,18 @@ TOPIC_HELP = {
         "  engine-editor-cli validate [--detail full]   # 图干跑校验（阻塞编排）\n"
         "  engine-editor-cli capture pie --out f.png    # 抓帧落盘（只回路径）\n"
         "  engine-editor-cli probe pie --points 400:300 # 像素采样 → RGBA（顶左坐标；help probe）\n"
-        "  engine-editor-cli setup [--workspace DIR] [--port N]  # 安装 skill + mcp.json\n"
+        "  engine-editor-cli setup [--workspace DIR] [--target auto|...] [--print]  # 安装 skill + MCP 配置\n"
         "值解析: 先尝试 JSON（数字/bool/数组/对象/引号字符串），失败按纯字符串。\n"
         "多引擎: 每个 agent 先 launch --port auto，后续统一用返回的 --port N。\n"
         "退出码/输出契约: `help exitcodes`（stdout 恒 JSON；stderr 可丢）。\n"
         "脚本模式: engine.ok('sim.play'); engine.try_send(...); engine.capture('pie'); engine.batch([...])"
     ),
     "skill": (
-        "Skill（渐进披露, 推荐安装）: engine-editor-cli setup --workspace <你的项目>\n"
-        "  写入 <ws>/.github/skills/engine-editor/SKILL.md（+ references/ops.md, workflows.md）\n"
-        "  并合并 .vscode/mcp.json 注册（lite 档）。\n"
-        "  Skill 按需加载: SKILL.md 只在相关任务时进入上下文; references 只在明确需要时读取。\n"
-        "  VS Code / Claude Code / Codex 等终端型 agent 均可用（CLI 通道无需 MCP）。"
+        "Skill（渐进披露, 可选安装）: engine-editor-cli setup --workspace <你的项目> --target auto。"
+        " 默认 auto：检测 .vscode/.claude/.cursor/.github；至少写 AGENTS.md 通用入口。"
+        " --target vscode|claude|cursor|github|codex|generic 可重复；--print 只出片段不写盘。"
+        " Skill 按需加载: SKILL.md 只在相关任务时进入上下文; references 只在明确需要时读取。"
+        " 任意终端型 agent 均可用 CLI；MCP 只是可选通道。"
     ),
     "capture": (
         "抓帧两种方式:\n"
@@ -560,6 +682,36 @@ def example_args(spec: OpSpec) -> str:
             val = "VALUE"
         parts.append(f"{p.name}={val}")
     return " ".join(parts)
+
+
+def param_dict(p: Param) -> dict:
+    """Param → 稳定 JSON 结构（manifest / MCP 生成共用）。"""
+    return {"name": p.name, "kind": p.kind, "required": bool(p.required),
+            "summary": p.summary}
+
+
+def op_dict(spec: OpSpec) -> dict:
+    """OpSpec → 稳定 JSON 结构（engine-cli/manifest/v1 的 ops[]）。"""
+    return {
+        "name": spec.name,
+        "category": spec.category,
+        "summary": spec.summary,
+        "params": [param_dict(p) for p in spec.params],
+        "internal": bool(spec.internal),
+        "detail": spec.detail,
+        "example": spec.example or example_args(spec),
+    }
+
+
+def manifest_ops(include_internal: bool = False) -> list[dict]:
+    """op 清单（按注册表插入顺序；默认排除内部 op）。"""
+    return [op_dict(o) for o in OPS.values()
+            if include_internal or not o.internal]
+
+
+def manifest_aliases() -> dict:
+    """旧工具名 → (op, 默认 args)，供 agent 迁移与兼容层生成。"""
+    return {k: {"op": v[0], "args": v[1]} for k, v in sorted(ALIASES.items())}
 
 
 def format_ops_list() -> str:
@@ -682,7 +834,7 @@ def summarize_report(report: dict, log_cap: int = 30) -> dict:
     if not isinstance(report, dict):
         return report
     out: dict = {}
-    for key in ("task_id", "state", "ok", "counts", "graph"):
+    for key in ("task_id", "state", "ok", "counts", "graph", "options", "timebase"):
         if key in report:
             out[key] = report[key]
     timing = report.get("timing")

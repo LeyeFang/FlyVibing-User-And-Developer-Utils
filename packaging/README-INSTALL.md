@@ -68,8 +68,9 @@ flyvibing-node-editor rules
 python -c "import flyvibing_extension_kit; print('extension-kit ok')"
 ```
 
-`engine-editor-cli setup --workspace DIR` 会写入 `.vscode/mcp.json` 与
-`.github/skills/engine-editor/`；安装完成并重载 IDE 窗口后，agent 才能看到 MCP 工具。
+`engine-editor-cli setup --workspace DIR --target auto` 会按检测到的客户端写入 MCP 配置
+（VS Code `.vscode/mcp.json` / Claude `.mcp.json` / Cursor `.cursor/mcp.json`）、skill 目录，
+并生成 `AGENTS.md` 标记块；安装完成并重载 IDE 窗口后，agent 才能看到 MCP 工具。
 
 ## 手动安装
 

@@ -82,7 +82,7 @@ engine-editor-cli capture pie --out frame.png
 在工作区中注册 MCP 服务与 skills：
 
 ```powershell
-engine-editor-cli setup --workspace C:\path\to\project
+engine-editor-cli setup --workspace C:\path\to\project --target auto
 ```
 
 手动配置 MCP：
@@ -99,7 +99,9 @@ engine-editor-cli setup --workspace C:\path\to\project
 }
 ```
 
-lite 档暴露 5 个工具（`engine_help`、`engine_call`、`engine_batch`、`engine_validate_graph`、`engine_capture`）。full 档保留旧的 44 工具接口。
+VS Code 用 `servers`；Claude Code / Cursor 用 `mcpServers`，不要混用。
+
+lite 档暴露 6 个工具（`engine_help`、`engine_call`、`engine_batch`、`engine_validate_graph`、`engine_capture`、`engine_launch`）。full 档保留 45 个旧 `editor_*` 工具 + `engine_launch`。
 
 ### 离线编排节点图
 

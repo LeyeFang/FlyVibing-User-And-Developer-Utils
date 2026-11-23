@@ -10,11 +10,10 @@
 
 启动 PIE（等同 Run 按钮；启动前硬预检，force 跳过 / auto_fix 自动修）
 
-预检只看“必然不生效”的状态（如未注册节点类型 → 图不会求值）。被拦时返回 {"error": "preflight_failed", "problems": [...]}，每条带 fix（可复制命令）与 owners（缺哪个扩展）；原因同时写入 sim.state 的 last_error，force 运行时 sim.state 会一直带 forced_unknown_types。lockstep=false 时 PIE 渲染不再等编辑器帧（旧行为让 PIE 被编辑器帧率钉死；见 Doc/Dev/phase_profiling_protocol.md）。
+预检只看“必然不生效”的状态（如未注册节点类型 → 图不会求值）。被拦时返回 {"error": "preflight_failed", "problems": [...]}，每条带 fix（可复制命令）与 owners（缺哪个扩展）；原因同时写入 sim.state 的 last_error，force 运行时 sim.state 会一直带 forced_unknown_types。
 
 - `force` (bool, 可选) — true=跳过未知节点类型等预检硬拦（默认 false）
 - `auto_fix` (bool, 可选) — true=先启用缺失扩展并就地补全画布节点，再启动
-- `lockstep` (bool, 可选) — true=PIE 渲染与编辑器严格逐帧交替（旧行为/确定性对照）；默认 false=解耦
 
 - 示例: `engine-editor-cli call sim.play force=true auto_fix=true`
 
@@ -26,7 +25,7 @@
 
 ### `sim.state`
 
-查询模拟状态（state / runtime_alive / lockstep；运行时附带 pie_fps 与帧分布）
+查询模拟状态（state / runtime_alive）
 
 - 示例: `engine-editor-cli call sim.state`
 
@@ -705,40 +704,6 @@ id=device path=C:/envs/eeg/Scripts/python.exe   # 覆盖`
 线程注册表快照（注册/未注册漂移/停滞检测; 见 Doc/Dev/threading_protocol.md）
 
 - 示例: `engine-editor-cli call threads.snapshot`
-
-## 性能诊断
-
-### `perf.profile`
-
-开关分相计时（见 Doc/Dev/phase_profiling_protocol.md）
-
-- `on` (bool, 可选) — true=开 / false=关（省略=查询当前状态）
-- `reset` (bool, 可选) — true=清空样本（已开启时不会自动清 → 对照实验必须带）
-- `target` (enum, 可选) — "editor"(默认) / "pie" / "all"
-
-- 示例: `engine-editor-cli call perf.profile on=true reset=true`
-
-### `perf.phases`
-
-分相统计快照（帧内各相排他时间/占比/百分位 + 未归因时间）
-
-- `target` (enum, 可选) — "all"(默认) / "editor" / "pie"
-- `text` (bool, 可选) — true=附带人读表格
-
-- 示例: `engine-editor-cli call perf.phases target="mesh" text=true`
-
-## 路径与宏
-
-### `path.roots`
-
-路径根与宏（engine/project/game/output/cwd + 可解析单个 spec）
-
-宏: <EngineRoot>(别名 <EditorRoot>) / <ProjectRoot> / <GameRoot> / <OutputRoot> / <Cwd>，大小写不敏感；`<` `>` 在 Windows 上是非法文件名，所以不会与真实目录混淆。相对路径默认落在 output 根。未知宏返回 resolve.error（不静默降级）。扩展侧等价接口: ctx.paths.resolve(spec)。
-
-- `resolve` (str, 可选) — 要解析的路径 spec（可含 <Macro>），返回 expanded 与 absolute
-- `text` (bool, 可选) — true=附带人读摘要
-
-- 示例: `engine-editor-cli call path.roots resolve=VALUE text=true`
 
 ## 编辑器
 

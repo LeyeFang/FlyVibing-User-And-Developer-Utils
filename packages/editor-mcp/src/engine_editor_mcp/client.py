@@ -380,13 +380,19 @@ def validate_graph_orchestrate(
     source: str = "canvas",
     graph: dict | None = None,
     frames: int = 360,
+    dt: float = 0.0,
     verbose: bool = True,
     seed: int = 0,
+    realtime: bool = False,
+    allow_long: bool = False,
     save_path: str | None = None,
     timeout_s: float = 120.0,
 ) -> dict:
     """校验编排（start→poll→report）— MCP 工具与 CLI validate 共用（同一引擎内服务）。"""
-    args: dict = {"source": source, "frames": frames, "verbose": verbose, "seed": seed}
+    args: dict = {"source": source, "frames": frames, "verbose": verbose, "seed": seed,
+                  "realtime": bool(realtime), "allow_long": bool(allow_long)}
+    if dt and float(dt) > 0:
+        args["dt"] = float(dt)
     if graph is not None:
         args["graph"] = graph
     started, _ = send_raw("graph.validate.start", args)

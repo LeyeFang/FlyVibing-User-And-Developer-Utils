@@ -324,7 +324,7 @@ UI 入口：Node Editor 工具栏 **Validate** 按钮（静态 / 360 帧 / 600 �
   **纯 socket 客户端，不 import Application**（测试守卫已扩展到包源码）；
   三方工作区：`pip install` wheel（零依赖构建: `python FlyVibing-User-And-Developer-Utils/packages/editor-mcp/build_wheel.py`）→
   `engine-editor-cli setup --workspace <项目>`（拷贝 Skill + 合并 mcp.json, 默认 lite 档）；详见 `FlyVibing-User-And-Developer-Utils/packages/editor-mcp/README.md`。
-- **op 注册表（单一 事实源）**：`src/engine_editor_mcp/ops.py`（60 ops: 摘要/参数/分类/旧工具别名;  每 op 含 call_timeout）。
+- **op 注册表（单一 事实源）**：`src/engine_editor_mcp/ops.py`（80 个核心 op: 摘要/参数/分类/旧工具别名;  每 op 含 call_timeout）。
   **扩展 op**（`ext.<id>.*`）为运行期增量注册，不入本静态表 — 发现用 `extension.list`, 调用直接透传
   （见 `Doc/ExtDev/extension_dev_protocol.md` §9）。
   驱动：CLI 命令与帮助、lite MCP 的 engine_help/engine_call、`docgen` 生成 `references/ops.md`；
@@ -359,7 +359,8 @@ UI 入口：Node Editor 工具栏 **Validate** 按钮（静态 / 360 帧 / 600 �
     （含面板/网格），验证**场景内容**请用 `probe pie`。
   - 要精确对位时先用 `renderer.snapshot` 拿 `viewport` 尺寸，再打一组网格标定。
 - **Skill**（`engine-editor`, 渐进披露）：SKILL.md（通道选择/速查/纪律）+ `references/ops.md`（docgen 生成）
-  + `references/workflows.md`（配方）；安装: `engine-editor-cli setup` 或仓库 `install_mcp.py`（同步到 `.github/skills/`）。
+  + `references/workflows.md`（配方）；安装: `engine-editor-cli setup --workspace <dir> --target auto`
+  （按检测到的客户端写入 skill 目录，并生成 `AGENTS.md` 标记块）。
 - **帧图像**（`engine_capture`）：request → 轮询 fetch → numpy 翻转（GL bottom-up → top-down，本进程）→
   Pillow 编码 PNG → ① 落盘 ② 返回 MCP 图像内容块（agent 可直接查看画面 + 说明文本含路径）；想省 token 用 CLI `capture`（只回路径）；
 - 抓帧目录：`<临时目录>\engine_editor_mcp\frames\frame_{editor|pie}_{时间戳}_g{gen}.png`
@@ -367,7 +368,8 @@ UI 入口：Node Editor 工具栏 **Validate** 按钮（静态 / 360 帧 / 600 �
 - 编辑器未运行时返回人话错误：`编辑器未运行（127.0.0.1:8977 无监听）— 请先启动 startup.bat。`
 - 注册（dev 仓库）：`.venv-py314t\Scripts\python.exe FlyVibing-User-And-Developer-Utils/packages/editor-mcp/install_mcp.py [--profile lite|full]` →
   写 `.vscode/mcp.json`（名称 `engine-editor-live`）+ 同步 Skill → **重载 VS Code 生效**；卸载 `--uninstall`；
-- 注册（外部工作区）：`engine-editor-cli setup --workspace <dir>`；引擎侧无需任何配置。
+- 注册（外部工作区）：`engine-editor-cli setup --workspace <dir> --target auto` —— 按客户端写
+  `.vscode/mcp.json` / `.mcp.json` / `.cursor/mcp.json`，生成 `AGENTS.md`；引擎侧无需任何配置。
 
 ## 6. 新增一个 op 的步骤（扩展清单）
 
@@ -393,7 +395,7 @@ UI 入口：Node Editor 工具栏 **Validate** 按钮（静态 / 360 帧 / 600 �
 | 多个编辑器互相串话 | 每个 agent `launch --port auto` 后用自己的 `--port N`；`engines` 可核对端口；不要共用默认 8977 |
 | `launch` 找不到引擎 | 传 `--engine-root <仓库根>`（需含 `startup.bat`）或设 `MGE_ENGINE_ROOT` |
 | `launch` 超时但进程还在 | 看返回的 `log_path`；引擎窗口启动慢时增大 `--timeout`，不要重复启动 |
-| `.vscode/mcp.json` 不生效 | 重载 VS Code 窗口；或 Command Palette → `MCP: List Servers` 手动重启 |
+| MCP 配置不生效（`.vscode/mcp.json` / `.mcp.json` / `.cursor/mcp.json`） | 重载 IDE 窗口；或在客户端的 MCP 列表里手动重启 server |
 | 某个 server 的工具缺失 / 启动失败 | `.vscode/mcp.json` 的 `command`/`cwd` 指向已搬迁的旧仓库路径（2026-09 实测: node-graph-editor 曾指向 `...\MI-SSSEP\Experiment\MyGameEngine-Python`，该路径已不存在）→ 用 `Test-Path` 核对后更新为当前仓库路径，再重载 VS Code |
 | `editor_capture` 超时 / 一直 pending | 现在**不会无限 pending**：租约到期回 `state=expired`，客户端按 `timeout_s` 整轮预算收口。若报"最小化"→ 还原窗口；否则看控制台 `[Live] frame.*` 审计行与 `renderer.snapshot`（渲染线程是否在产帧） |
 | `engine_capture` 报 `error_code=wedged` | 本进程的 socket 层超过 `timeout+1s` 没返回（系统挂起/驱动阻塞）—— 客户端已放弃等待；重试或改用 CLI `capture` |

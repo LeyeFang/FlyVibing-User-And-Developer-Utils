@@ -88,12 +88,16 @@ scene 文件格式（`{"scene": {"node_graph": ...}}`）由 `extract_graph_data`
 ```json
 {
   "task_id": 3, "state": "done", "ok": true,
-  "options": {"frames": 360, "dt": 0.016667, "seed": 0, "verbose": true},
+  "options": {"frames": 360, "dt": 0.016667, "seed": 0, "verbose": true,
+              "realtime": false, "allow_long": false},
   "graph": {"nodes": 141, "links": 180, "hash": "sha1:xxxxxxxxxxxx"},
   "static": {"errors": [], "warnings": []},          // 条目数组（结构化）
+  "timebase": {"mode": "fake", "fps": 60.0, "dt": 0.016667, "frames": 360,
+               "duration": 6.0, "seed": 0, "modes": ["fake", "realtime"],
+               "hint": "...", "warning": "fake-time 60 fps 可能把高频信号量化成假危险..."},
   "runtime": {"errors": [], "skipped": false, "frames_simulated": 360,
                "total_events": 1234, "events_by_type": {...}, "cancelled": false,
-               "killed_sessions": [], "log": [...]},
+               "killed_sessions": [], "timebase": {...}, "log": [...]},
   "counts": {"errors": 0, "warnings": 0, "log_lines": 1234},
   "timing": {"started_iso": "...", "finished_iso": "...", "duration_ms": 48.2},
   "log": [{"frame": 0, "node_id": 5, "node_type": "Print", "action": "print", "detail": "42.0"}]
@@ -101,6 +105,10 @@ scene 文件格式（`{"scene": {"node_graph": ...}}`）由 `extract_graph_data`
 ```
 
 - `ok = (state=="done") and 无静态 error and 无运行时 error`；
+- `timebase` 强制声明 fake / realtime 两种模式：`mode` 为本次实际模式，`modes` 恒为两者，
+  `hint` 说明另一种模式怎么用；fake <120 fps 或 realtime 时附 `warning`。
+  realtime 额外带 `measured.fps` 与 `dt_ms` 的 min/p50/p95/max。
+- `timebase` 只含进程调度抖动；GPU/渲染抖动仍以 PIE + probe 为准。
 - 落盘: `save_path` 以 `.txt` 结尾 → 人类可读文本（含事件日志全文）；其余 → JSON；
 - MCP 回传时 `log` 超过 500 条会截断并附 `log_truncated/log_total`（完整日志用 `save_path` 落盘）。
 

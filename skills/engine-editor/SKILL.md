@@ -30,14 +30,14 @@ OnGameStart ──exec──> EntitySpawn(template=<实体名>)
 `sim.play` 遇到此类场景（有 MeshRenderer 实体但无 EntitySpawn）会返回 `warning` 字段并在编辑器控制台提醒；
 看到 warning / 空画面时先补图（配方见 `references/workflows.md` §1/§2）。
 
-## 1. 通道选择（token 成本排序）
+<!-- flyvibing:onboarding:begin -->
+## 1. 通道与规模（由 `agent/onboarding.md` + 注册表生成 — 勿手改）
 
-| 通道 | 未使用时的常驻成本 | 何时用 |
-|---|---|---|
-| `engine-editor-cli`（终端） | **0** | 默认首选：多步、批处理、脚本、需要过滤输出 |
-| MCP `engine_call` / `engine_batch` | ~1k tokens（lite 档 6 工具） | 无终端权限、或任务需要图像直回 |
-| MCP 旧 `editor_*` 工具（45 个 + `engine_launch`） | ~6k tokens（full 档） | 仅当 `MGE_MCP_PROFILE=full` 且提示词已绑定旧工具名 |
-| `engine_capture`（MCP） | 同 lite | 需要**看到**画面时；否则 `engine-editor-cli capture`（只落盘） |
+- **CLI 优先**：`engine-editor-cli ops --json` / `help <op>`；任意终端型 agent 可用，未使用时常驻成本为 0。
+- **MCP 可选**：lite 档 6 个元工具；full 档 45 个旧 `editor_*` 工具 + `engine_launch`。
+- **规模**：80 个核心 op（不含内部 op）；完整参考 `references/ops.md`（docgen 生成）。
+- **纪律**：先索引后内容；大输出落盘再局部读；多步操作合并成 `batch` / `exec`。
+<!-- flyvibing:onboarding:end -->
 
 ## 2. CLI 速查
 
@@ -45,7 +45,7 @@ OnGameStart ──exec──> EntitySpawn(template=<实体名>)
 engine-editor-cli launch --port auto --language zh   # 启动引擎 + 自动端口握手（多引擎首选）
 engine-editor-cli engines                    # 列出运行中的编辑器端口
 engine-editor-cli --port 8977 call settings.get     # 全局端口指向某个实例
-engine-editor-cli ops                        # op 目录（60 个核心 op; 一行一个; 扩展 op 见 extension.list）
+engine-editor-cli ops                        # op 目录（80 个核心 op; 一行一个; 扩展 op 见 extension.list）
 engine-editor-cli help entity.transform      # 单 op 详情（参数 + 示例）
 engine-editor-cli call entity.add name=MCP_Cue
 engine-editor-cli call entity.transform id=5 position='[1,0,2]' scale=2

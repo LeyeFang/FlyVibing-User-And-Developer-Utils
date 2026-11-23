@@ -28,6 +28,15 @@ SYNC_TARGETS = (
 )
 PACKAGES = ("editor-mcp", "node-editor", "extension-kit")
 
+# 平台 adapter 描述（setup --target 读取；wheel 内需要一份）
+AGENT_TARGETS_SRC = os.path.join("agent", "targets.json")
+AGENT_TARGETS_DST = os.path.join(
+    "packages", "editor-mcp", "src", "engine_editor_mcp", "agent_targets.json")
+# canonical agent onboarding（setup 的 AGENTS.md 块；wheel 内需要一份）
+AGENT_ONBOARDING_SRC = os.path.join("agent", "onboarding.md")
+AGENT_ONBOARDING_DST = os.path.join(
+    "packages", "editor-mcp", "src", "engine_editor_mcp", "agent_onboarding.md")
+
 
 def sync_skills() -> None:
     for src_rel, dst_rel in SYNC_TARGETS:
@@ -71,10 +80,36 @@ def write_checksums(wheels: list[str], out_dir: str) -> None:
     print(f"  [sha256] {os.path.relpath(path, ROOT)} ({len(lines)} files)")
 
 
+def sync_agent_targets() -> None:
+    for src_rel, dst_rel in ((AGENT_TARGETS_SRC, AGENT_TARGETS_DST),
+                             (AGENT_ONBOARDING_SRC, AGENT_ONBOARDING_DST)):
+        src = os.path.join(ROOT, src_rel)
+        dst = os.path.join(ROOT, dst_rel)
+        if not os.path.isfile(src):
+            print(f"  [skip] {src_rel} 不存在")
+            continue
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(src, dst)
+        print(f"  [sync] {src_rel} -> {dst_rel}")
+
+
+def gen_agent_docs() -> None:
+    script = os.path.join(ROOT, "scripts", "gen_agent_docs.py")
+    rc = subprocess.run([sys.executable, script], capture_output=True, text=True)
+    print(rc.stdout.rstrip() or "  [gen] up to date")
+    if rc.returncode != 0:
+        print(rc.stderr[-800:])
+        raise SystemExit("generate agent docs failed")
+
+
 def main() -> int:
     out_dir = os.path.join(ROOT, "dist")
-    print("== sync skills ==")
     if "--no-sync" not in sys.argv:
+        print("== sync agent assets ==")
+        sync_agent_targets()
+        print("== gen agent docs ==")
+        gen_agent_docs()
+        print("== sync skills ==")
         sync_skills()
     print("== build wheels ==")
     wheels = build_wheels(out_dir)

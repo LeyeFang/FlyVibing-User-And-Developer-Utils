@@ -36,27 +36,40 @@
 
 **A. 最省事：让 CLI 自己装配（推荐）**
 
-```powershell
+```text
 # Windows：解压 FlyVibing-Tools-0.6.0.zip 后双击 install.cmd
 # 或从本仓库 wheel/ 安装：
 pip install engine-editor-mcp
-engine-editor-cli setup --workspace D:\Experiments\MyParadigm
+engine-editor-cli setup --workspace D:\Experiments\MyParadigm --target auto
 ```
 
-`setup` 会把 agent 技能（skill）与 MCP 配置（`mcp.json`）写进你的工作区。
+`setup` 默认 `auto`：检测 `.vscode` / `.claude` / `.cursor` / `.github`，写入对应 MCP 配置，
+并生成 `AGENTS.md` 通用入口（带 `flyvibing:begin/end` 标记，不覆盖你已有内容）。
+不确定客户端路径时用 `--print` 只打印片段：
 
-**B. 用 MCP 客户端手动加**（VS Code / Codex / Claude Code 等）
+```text
+engine-editor-cli setup --workspace D:\Experiments\MyParadigm --target claude --print
+```
+
+**B. 用 MCP 客户端手动加**
+
+不同客户端的顶层 key 不同，不要混用：
 
 ```json
+// VS Code: .vscode/mcp.json
 { "servers": { "engine-editor-live": { "type": "stdio",
+  "command": "engine-editor-mcp", "args": ["--profile", "lite"] } } }
+
+// Claude Code / Cursor: .mcp.json 或 .cursor/mcp.json
+{ "mcpServers": { "engine-editor-live": {
   "command": "engine-editor-mcp", "args": ["--profile", "lite"] } } }
 ```
 
-**C. 只用命令行的 agent**（不需要 MCP）：把仓库里的
-`skills/engine-editor/SKILL.md` 放进工作区（例如 `.github/skills/` 或 `AGENTS.md` 引用它），
-agent 会自动知道怎么用 `engine-editor-cli`。
+**C. 只用命令行的 agent**（不需要 MCP）：让 agent 读工作区的 `AGENTS.md`，
+或把 `skills/engine-editor/SKILL.md` 放进对应 skill 目录；CLI 本身零常驻成本。
 
-> 三种方式可以叠加。核心是：**让 agent 知道"有一台在跑的编辑器可以被命令行/MCP 操作"**。
+> 三种方式可以叠加。核心是：**让 agent 知道有一台在跑的编辑器可以被命令行/MCP 操作**；
+> CLI 是通用层，MCP/Skill 只是适配层。
 
 ## 3. 给 agent 说需求
 

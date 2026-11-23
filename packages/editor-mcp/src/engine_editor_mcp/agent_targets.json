@@ -1,0 +1,61 @@
+{
+  "schema": "flyvibing-agent-targets/v1",
+  "version": 1,
+  "default": "auto",
+  "targets": {
+    "vscode": {
+      "label": "VS Code / GitHub Copilot",
+      "detect": [".vscode"],
+      "mcp": {
+        "path": ".vscode/mcp.json",
+        "root_key": "servers",
+        "type": "stdio"
+      },
+      "skills": [".github/skills"],
+      "instructions": "AGENTS.md"
+    },
+    "claude": {
+      "label": "Claude Code",
+      "detect": [".claude"],
+      "mcp": {
+        "path": ".mcp.json",
+        "root_key": "mcpServers",
+        "type": null
+      },
+      "skills": [".claude/skills"],
+      "instructions": "AGENTS.md"
+    },
+    "cursor": {
+      "label": "Cursor",
+      "detect": [".cursor"],
+      "mcp": {
+        "path": ".cursor/mcp.json",
+        "root_key": "mcpServers",
+        "type": null
+      },
+      "skills": [],
+      "instructions": "AGENTS.md"
+    },
+    "github": {
+      "label": "GitHub Copilot skills",
+      "detect": [".github"],
+      "mcp": null,
+      "skills": [".github/skills"],
+      "instructions": "AGENTS.md"
+    },
+    "codex": {
+      "label": "OpenAI Codex",
+      "detect": ["AGENTS.md"],
+      "mcp": null,
+      "skills": [],
+      "instructions": "AGENTS.md"
+    },
+    "generic": {
+      "label": "Generic terminal agent",
+      "detect": [],
+      "mcp": null,
+      "skills": [],
+      "instructions": "AGENTS.md"
+    }
+  }
+}

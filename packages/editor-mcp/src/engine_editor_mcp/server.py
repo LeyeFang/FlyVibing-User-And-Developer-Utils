@@ -31,12 +31,13 @@ Engine Editor Live MCP — 运行中编辑器的热注入工具（v0.5.0: 双档
 独立分发的三种消费形态（同一 wheel, 同一 op 注册表 ops.py）:
     CLI（零常驻上下文成本, 任意终端型 agent 首选）: engine-editor-cli
     MCP lite / full: python -m engine_editor_mcp --profile lite|full
-    Skill（渐进披露）: engine-editor-cli setup --workspace <项目目录>
+    Skill（渐进披露）: engine-editor-cli setup --workspace <项目目录> --target auto
 
 dev 仓库内等价入口: python Utils\\ExtDev\\EditorMcp\\mcp_server.py （薄 shim, 同一源码）
 """
 
 import asyncio
+import inspect
 import io
 import json
 import os
@@ -126,141 +127,6 @@ def _wipe_frames_dir() -> None:
     wipe_frames_dir()
 
 
-@mcp.tool()
-def editor_run_pie() -> dict:
-    """触发编辑器 Play（等同 Run 按钮）：启动 PIE 运行时。
-
-    Returns:
-        {"requested": true, "state": "pending_start"} 或 {"requested": false, "state": ...}
-        或 {"error": "..."}
-    """
-    return _send("sim.play")
-
-
-@mcp.tool()
-def editor_stop_pie() -> dict:
-    """停止 PIE（等同 Scene 面板 Stop 按钮）。
-
-    Returns:
-        {"requested": true, "state": "pending_stop"} 或 {"requested": false, "state": "Stopped"}
-        或 {"error": "..."}
-    """
-    return _send("sim.stop")
-
-
-@mcp.tool()
-def editor_sim_state() -> dict:
-    """查询模拟状态（只读）：state = Stopped / Running / Paused; runtime_alive = PIE 线程存活。"""
-    return _send("sim.state")
-
-
-@mcp.tool()
-def editor_switch_2d() -> dict:
-    """切到 2D（等同 Scene 面板 “2D” 按钮：同时设置 game_type 与编辑器视口）。
-
-    注意: 会同时设置 scene.game_type — 影响 PIE 启动时使用的场景摄像机。
-
-    Returns:
-        {"mode": "2d", "label": "2D (Ortho)", "game_type": "2d"} 或 {"error": "..."}
-    """
-    return _send("view.set_mode", {"mode": "2d"})
-
-
-@mcp.tool()
-def editor_set_scene_type(mode: str) -> dict:
-    """设置场景类型（等同 Scene Type 按钮：3D / 2D / Overlay）— 含 game_type + 编辑器视口。
-
-    Args:
-        mode: "3d" / "2d" / "overlay"
-    """
-    return _send("view.set_mode", {"mode": mode})
-
-
-@mcp.tool()
-def editor_camera_get(role: str = "3d") -> dict:
-    """读取场景摄像机（role: "3d" / "2d" / "overlay"）的 Transform + Camera 属性。"""
-    return _send("camera.get", {"role": role})
-
-
-@mcp.tool()
-def editor_camera_set(
-    role: str = "3d",
-    position: list[float] | None = None,
-    rotation: list[float] | None = None,
-    projection: str | None = None,
-    ortho_size: float | None = None,
-    fov: float | None = None,
-) -> dict:
-    """修改场景摄像机（仅编辑器场景; 只改传入字段）。
-
-    Args:
-        role: "3d" / "2d" / "overlay"
-        position / rotation: [x, y, z]（GL 坐标系）
-        projection: "persp" / "ortho"
-        ortho_size / fov: 可选其它属性
-    """
-    args: dict = {"role": role}
-    if position is not None:
-        args["position"] = list(position)
-    if rotation is not None:
-        args["rotation"] = list(rotation)
-    if projection is not None:
-        args["projection"] = projection
-    if ortho_size is not None:
-        args["ortho_size"] = ortho_size
-    if fov is not None:
-        args["fov"] = fov
-    return _send("camera.set", args)
-
-
-@mcp.tool()
-def editor_graph_list() -> dict:
-    """读取节点图画布快照（节点: id/type/props/pins; 连线: from_pin/to_pin）。"""
-    return _send("graph.list")
-
-
-@mcp.tool()
-def editor_graph_add(node_type: str, props: dict | None = None,
-                     position: list[float] | None = None,
-                     description: str | None = None) -> dict:
-    """在节点图添加节点（等同 Add 菜单）。
-
-    例: editor_graph_add("EntitySpawn", {"template": "DefaultCube"})
-    """
-    args: dict = {"type": node_type}
-    if props:
-        args["props"] = props
-    if description is not None:
-        args["description"] = description
-    if position is not None:
-        args["position"] = list(position)
-    return _send("graph.add", args)
-
-
-@mcp.tool()
-def editor_graph_link(from_node: int, from_pin: str, to_node: int, to_pin: str) -> dict:
-    """连接两个引脚（等同画布拖线）。例: OnGameStart.exec → EntitySpawn.exec_in。"""
-    return _send("graph.link", {
-        "from": {"node": from_node, "pin": from_pin},
-        "to": {"node": to_node, "pin": to_pin},
-    })
-
-
-@mcp.tool()
-def editor_graph_set_props(node_id: int, props: dict) -> dict:
-    """更新节点属性（等同内联控件改属性）。"""
-    return _send("graph.set_props", {"node": node_id, "props": props})
-
-
-@mcp.tool()
-def editor_graph_set_description(node_id: int, description: str | None = None) -> dict:
-    """读写节点描述（省略 description=读取；空串=清除）。"""
-    args: dict = {"node": node_id}
-    if description is not None:
-        args["description"] = description
-    return _send("graph.set_description", args)
-
-
 # ════════════════════════════════════════════════════════════════
 # v4: 图校验（引擎内服务） / 图导入导出 / 工程打开
 # ════════════════════════════════════════════════════════════════
@@ -285,8 +151,11 @@ def _validate_orchestrate(
     source: str = "canvas",
     graph: dict | None = None,
     frames: int = 360,
+    dt: float = 0.0,
     verbose: bool = True,
     seed: int = 0,
+    realtime: bool = False,
+    allow_long: bool = False,
     save_path: str | None = None,
     timeout_s: float = 120.0,
 ) -> dict:
@@ -295,8 +164,11 @@ def _validate_orchestrate(
         source=source,
         graph=graph,
         frames=frames,
+        dt=dt,
         verbose=verbose,
         seed=seed,
+        realtime=realtime,
+        allow_long=allow_long,
         save_path=save_path,
         timeout_s=timeout_s,
     )
@@ -362,294 +234,9 @@ def editor_graph_validate_cancel(task_id: int | None = None) -> dict:
     return _send("graph.validate.cancel", args)
 
 
-@mcp.tool()
-async def editor_graph_export(path: str | None = None, include_rules: bool = True) -> dict:
-    """导出当前画布节点图 JSON（含 _rules 规则文档; path 给了同时落盘 .json）。
-
-    Returns: {nodes, links, saved_path, graph: {...}}
-    """
-    args: dict = {"include_rules": include_rules}
-    if path:
-        args["path"] = path
-    try:
-        return await _offload(_send, 35.0, "graph.export", args, 30.0)
-    except _DeadlineExceeded as e:
-        return {"error": str(e), "error_code": "timeout"}
-
-
-@mcp.tool()
-async def editor_graph_import(graph: dict | None = None, path: str | None = None, validate_first: bool = True) -> dict:
-    """导入节点图替换当前画布（先静态检查, 有 error 拒绝; 强制导入传 validate_first=False）。
-
-    Args:
-        graph: graph dict（优先） 或 path: .json 文件
-    """
-    args: dict = {"validate_first": validate_first}
-    if graph is not None:
-        args["graph"] = graph
-    if path:
-        args["path"] = path
-    try:
-        return await _offload(_send, 35.0, "graph.import", args, 30.0)
-    except _DeadlineExceeded as e:
-        return {"error": str(e), "error_code": "timeout"}
-
-
-@mcp.tool()
-async def editor_project_open(path: str) -> dict:
-    """打开 .myproj 工程（等同 File ▸ Open Project — 资源+场景全加载, 启动场景激活）。
-
-    Returns: {opened, name, path, scenes, active}
-    """
-    try:
-        return await _offload(_send, 65.0, "project.open", {"path": path}, 60.0)
-    except _DeadlineExceeded as e:
-        return {"error": str(e), "error_code": "timeout"}
-
-
 # ════════════════════════════════════════════════════════════════
 # v3: 实体 / 选中 / 组件 / 场景 / 资源（编辑器的容器级操作）
 # ════════════════════════════════════════════════════════════════
-
-
-def _entity_args(entity_id: int | None, name: str | None) -> dict:
-    """实体寻址参数: id / name 二选一（id 优先）。"""
-    args: dict = {}
-    if entity_id is not None:
-        args["id"] = entity_id
-    if name is not None:
-        args["name"] = name
-    return args
-
-
-@mcp.tool()
-def editor_entity_list(roots_only: bool = False) -> dict:
-    """列出场景中的实体（roots_only=true 仅根实体）。"""
-    return _send("entity.list", {"roots_only": roots_only})
-
-
-@mcp.tool()
-def editor_entity_get(entity_id: int | None = None, name: str | None = None) -> dict:
-    """读取实体快照（名称/组件/层级/可见性/transform — 编辑器坐标、角度制）。"""
-    return _send("entity.get", _entity_args(entity_id, name))
-
-
-@mcp.tool()
-def editor_entity_add(name: str = "", parent: int | str | None = None) -> dict:
-    """新建实体（仅 Transform; 与面板 +New 一致 — 有选中时成为其子级）。
-
-    parent: 显式指定父实体（id 或名称）; 传 "none" 强制作为根实体。
-    """
-    args: dict = {"name": name}
-    if parent is not None:
-        args["parent"] = parent
-    return _send("entity.add", args)
-
-
-@mcp.tool()
-def editor_entity_rename(new_name: str, entity_id: int | None = None, name: str | None = None) -> dict:
-    """重命名实体（名称不强制唯一 — 返回重名警告）。"""
-    args = _entity_args(entity_id, name)
-    args["new_name"] = new_name
-    return _send("entity.rename", args)
-
-
-@mcp.tool()
-def editor_entity_delete(entity_id: int | None = None, name: str | None = None) -> dict:
-    """删除实体及其子实体。"""
-    return _send("entity.delete", _entity_args(entity_id, name))
-
-
-@mcp.tool()
-def editor_entity_transform(
-    entity_id: int | None = None,
-    name: str | None = None,
-    position: list[float] | None = None,
-    rotation: list[float] | None = None,
-    scale: list[float] | None = None,
-    local: bool = False,
-    relative: bool = False,
-) -> dict:
-    """设置实体 transform（编辑器坐标系、旋转用角度; local=true 写本地坐标）。
-
-    relative=true: 相对调整（位移加法 / 旋转加法 / 缩放乘法 — 等同 gizmo 拖拽语义）;
-    scale 可传标量做等比缩放（如 scale=2 → 2,2,2）。
-    """
-    args = _entity_args(entity_id, name)
-    if position is not None:
-        args["position"] = list(position)
-    if rotation is not None:
-        args["rotation"] = list(rotation)
-    if scale is not None:
-        args["scale"] = list(scale)
-    if local:
-        args["local"] = True
-    if relative:
-        args["relative"] = True
-    return _send("entity.transform", args)
-
-
-@mcp.tool()
-def editor_entity_visible(
-    entity_id: int | None = None,
-    name: str | None = None,
-    editor: bool | None = None,
-    render: bool | None = None,
-) -> dict:
-    """设置编辑器视口可见性（editor）与渲染可见性（render）。"""
-    args = _entity_args(entity_id, name)
-    if editor is not None:
-        args["editor"] = editor
-    if render is not None:
-        args["render"] = render
-    return _send("entity.visible", args)
-
-
-@mcp.tool()
-def editor_entity_reparent(parent: int | str, entity_id: int | None = None, name: str | None = None) -> dict:
-    """设置父实体（parent: id/名称; "none" 解除父级）。"""
-    args = _entity_args(entity_id, name)
-    args["parent"] = parent
-    return _send("entity.reparent", args)
-
-
-@mcp.tool()
-def editor_selection_get() -> dict:
-    """当前选中的实体（无选中 → entity_id=null）。"""
-    return _send("selection.get")
-
-
-@mcp.tool()
-def editor_selection_set(entity_id: int | None = None, name: str | None = None, gizmo: bool = True) -> dict:
-    """选中实体（gizmo=true 同时显示变换 gizmo — 等同视口点选）。"""
-    args = _entity_args(entity_id, name)
-    args["gizmo"] = gizmo
-    return _send("selection.set", args)
-
-
-@mcp.tool()
-def editor_selection_clear() -> dict:
-    """清除选中。"""
-    return _send("selection.clear")
-
-
-@mcp.tool()
-def editor_component_types() -> dict:
-    """已注册的组件类型（可用名称表）。"""
-    return _send("component.types")
-
-
-@mcp.tool()
-def editor_component_list(entity_id: int | None = None, name: str | None = None) -> dict:
-    """实体的组件名列表。"""
-    return _send("component.list", _entity_args(entity_id, name))
-
-
-@mcp.tool()
-def editor_component_add(type: str, entity_id: int | None = None, name: str | None = None) -> dict:
-    """给实体添加组件（MeshRenderer 自动绑定默认 Cube 网格）。"""
-    args = _entity_args(entity_id, name)
-    args["type"] = type
-    return _send("component.add", args)
-
-
-@mcp.tool()
-def editor_component_remove(type: str, entity_id: int | None = None, name: str | None = None) -> dict:
-    """移除组件（Transform 不可移除）。"""
-    args = _entity_args(entity_id, name)
-    args["type"] = type
-    return _send("component.remove", args)
-
-
-@mcp.tool()
-def editor_component_get(type: str, entity_id: int | None = None, name: str | None = None) -> dict:
-    """读取组件字段快照。"""
-    args = _entity_args(entity_id, name)
-    args["type"] = type
-    return _send("component.get", args)
-
-
-@mcp.tool()
-def editor_component_set(
-    type: str,
-    fields: dict,
-    entity_id: int | None = None,
-    name: str | None = None,
-    local: bool = False,
-    relative: bool = False,
-) -> dict:
-    """修改组件字段（fields 为部分更新）。
-
-    type="Transform" 例: fields={"position": [3, 0, 0], "scale": 2}
-      （relative=true 相对调整: 位移加法 / 旋转加法 / 缩放乘法）;
-    type="MeshRenderer" 可用字段:
-      color [r,g,b(,a)] / mesh (名称或 id) / material (名称或 id) /
-      visible / material_name / shader (名称或 id) / uniform ({名: 值}) /
-      texture (+"texture_slot") / texture_add / texture_remove (slot号);
-    type="Camera" 例: fields={"fov": 60, "projection": "ortho"}。
-    """
-    args = _entity_args(entity_id, name)
-    args["type"] = type
-    args["fields"] = fields
-    if local:
-        args["local"] = True
-    if relative:
-        args["relative"] = True
-    return _send("component.set", args)
-
-
-@mcp.tool()
-def editor_scene_list() -> dict:
-    """场景列表 + 当前活跃场景。"""
-    return _send("scene.list")
-
-
-@mcp.tool()
-def editor_scene_switch(name: str) -> dict:
-    """切换场景（含保存当前/加载/视口/节点图同步全流程）。"""
-    return _send("scene.switch", {"name": name})
-
-
-@mcp.tool()
-def editor_scene_create(name: str) -> dict:
-    """新建场景并设为活跃。"""
-    return _send("scene.create", {"name": name})
-
-
-@mcp.tool()
-def editor_scene_save(path: str | None = None) -> dict:
-    """保存当前场景为 .scene 文件（省略 path 时用最近保存路径）。"""
-    args = {"path": path} if path else {}
-    return _send("scene.save", args)
-
-
-@mcp.tool()
-def editor_scene_load(path: str) -> dict:
-    """从 .scene 文件加载并设为活跃。"""
-    return _send("scene.load", {"path": path})
-
-
-@mcp.tool()
-def editor_resource_list(kind: str) -> dict:
-    """资源列表 — kind: "mesh" / "shader" / "texture" / "material" / "prefab"。"""
-    return _send("resource.list", {"kind": kind})
-
-
-@mcp.tool()
-def editor_resource_find(kind: str, name: str) -> dict:
-    """按名查找资源（返回全部匹配; 名称不保证唯一）。"""
-    return _send("resource.find", {"kind": kind, "name": name})
-
-
-@mcp.tool()
-def editor_resource_material_get(material_id: int | None = None, name: str | None = None) -> dict:
-    """材质详情（名称/shader/颜色/纹理槽/uniform 键）。"""
-    args: dict = {}
-    if material_id is not None:
-        args["id"] = material_id
-    if name is not None:
-        args["name"] = name
-    return _send("resource.material.get", args)
 
 
 @mcp.tool()
@@ -670,16 +257,6 @@ async def editor_capture(target: str = "editor", timeout_s: float = 6.0):
     except (_DeadlineExceeded, RuntimeError) as e:
         raise ValueError(f"capture failed: {e}") from e
     return [Image(data=png_bytes, format="png"), f"saved: {path}"]
-
-
-@mcp.tool()
-def editor_quit() -> dict:
-    """请求关闭编辑器引擎（等同点击窗口关闭按钮，下一帧开始正常退出流程）。
-
-    Returns:
-        {"closing": true, "via": "window_close_request" | "run_state"} 或 {"error": "..."}
-    """
-    return _send("editor.quit")
 
 
 # ════════════════════════════════════════════════════════════════
@@ -805,16 +382,23 @@ async def engine_validate_graph(
     source: str = "canvas",
     graph: dict | None = None,
     frames: int = 360,
+    dt: float = 0.0,
     verbose: bool = False,
     seed: int = 0,
+    realtime: bool = False,
+    allow_long: bool = False,
     save_path: str | None = None,
     detail: str = "summary",
     timeout_s: float = 120.0,
 ) -> dict:
-    """干跑校验节点图（静态 + fake-time 模拟; 需引擎运行中）。detail='summary'（默认）省 token; 'full' 完整报告。"""
+    """干跑校验节点图（静态 + 模拟; 需引擎运行中）。
+
+    默认 fake-time；`realtime=True` 走 wall-clock 实速以暴露调度抖动。
+    detail='summary'（默认）省 token; 'full' 完整报告。报告始终带 `timebase`（含两种模式提示）。
+    """
     try:
         result = await _offload(_validate_orchestrate, timeout_s + 30.0, source, graph, frames,
-                                verbose, seed, save_path, timeout_s)
+                                dt, verbose, seed, realtime, allow_long, save_path, timeout_s)
     except _DeadlineExceeded as e:
         return {"error": str(e), "error_code": "timeout"}
     if "error" in result:
@@ -885,7 +469,71 @@ async def engine_launch(
     return result
 
 
-# 全量工具主表（apply_profile 的单一数据源 — 在所有 @mcp.tool() 定义之后固化）
+# ════════════════════════════════════════════════════════════════
+# full 档旧工具 — 由 op 注册表生成（server 不再是第二份工具定义）
+#   名字/参数/转发目标来自 ops.py; 这里只负责把 ToolSpec 变成 FastMCP 工具。
+#   特例（抓帧 / 校验编排）仍手写：它们不是单个 op 的直传。
+# ════════════════════════════════════════════════════════════════
+
+
+def _assign_arg(args: dict, path: str, value) -> None:
+    """按参数路径写入；`from.node` 这类路径组装嵌套 dict。"""
+    if "." not in path:
+        args[path] = value
+        return
+    head, _, tail = path.partition(".")
+    args.setdefault(head, {})[tail] = value
+
+
+def _legacy_tool_doc(tool: op_registry.ToolSpec) -> str:
+    lines = [tool.summary or tool.op, "", f"op: `{tool.op}`（旧工具名保留兼容）"]
+    if tool.fixed:
+        fixed = ", ".join(f"{k}={v!r}" for k, v in tool.fixed)
+        lines += ["", f"固定参数: {fixed}"]
+    if tool.params:
+        lines += ["", "Args:"]
+        for p in tool.params:
+            req = "必填" if p.required else "可选"
+            lines.append(f"    {p.name}: {p.summary or '—'}（{req}）")
+    lines += ["", "返回引擎结果 dict；超时返回 {error, error_code: \"timeout\"}。"]
+    return "\n".join(lines)
+
+
+def _make_legacy_tool(tool: op_registry.ToolSpec):
+    async def call(**kwargs):
+        args = dict(tool.fixed)
+        for p in tool.params:
+            value = kwargs.get(p.name)
+            if value is not None:
+                _assign_arg(args, p.arg, value)
+        args = op_registry.prepare_args(tool.op, args)
+        timeout = op_registry.call_timeout(tool.op)
+        try:
+            return await _offload(_send, timeout + 5.0, tool.op, args, timeout)
+        except _DeadlineExceeded as e:
+            return {"error": f"{tool.op}: {e}", "error_code": "timeout"}
+
+    call.__name__ = tool.name
+    call.__doc__ = _legacy_tool_doc(tool)
+    call.__signature__ = inspect.Signature(
+        [
+            inspect.Parameter(
+                p.name,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                default=inspect.Parameter.empty if p.required else p.default,
+                annotation=p.annotation,
+            )
+            for p in tool.params
+        ],
+        return_annotation=dict,
+    )
+    return call
+
+
+for _tool in op_registry.legacy_tool_specs():
+    mcp.add_tool(_make_legacy_tool(_tool), name=_tool.name)
+
+
 try:
     _ALL_TOOL_OBJECTS: dict = dict(mcp._tool_manager._tools)
 except AttributeError:

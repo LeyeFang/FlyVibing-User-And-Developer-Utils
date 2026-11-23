@@ -9,7 +9,7 @@ Usage:
   powershell -ExecutionPolicy Bypass -File install.ps1 [options]
 
 Options:
-  --workspace DIR   write the engine-editor skill and .vscode/mcp.json there
+  --workspace DIR   register tools there (skills + per-client MCP config + AGENTS.md)
   --profile lite    MCP profile (lite or full; default: lite)
   --python PATH     Python 3.10+ executable to use
   --offline         use bundled wheels only; dependencies must already exist

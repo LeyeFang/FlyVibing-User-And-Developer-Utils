@@ -116,7 +116,7 @@ Branch on the exit code rather than grepping output.
 Register the MCP server and skills in a workspace:
 
 ```powershell
-engine-editor-cli setup --workspace C:\path\to\project
+engine-editor-cli setup --workspace C:\path\to\project --target auto
 ```
 
 Manual MCP configuration:
@@ -133,7 +133,9 @@ Manual MCP configuration:
 }
 ```
 
-The lite profile exposes five tools (`engine_help`, `engine_call`, `engine_batch`, `engine_validate_graph`, `engine_capture`). The full profile preserves the legacy 44-tool surface.
+VS Code uses the `servers` key; Claude Code and Cursor use `mcpServers` — do not mix them.
+
+The lite profile exposes six tools (`engine_help`, `engine_call`, `engine_batch`, `engine_validate_graph`, `engine_capture`, `engine_launch`). The full profile preserves the 45 legacy `editor_*` tools plus `engine_launch`.
 
 ### Offline node-graph authoring
 

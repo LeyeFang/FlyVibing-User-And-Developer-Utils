@@ -38,6 +38,7 @@ import time
 from pathlib import Path
 
 from . import __version__
+from . import agent_docs
 from . import ops as op_registry
 from .client import (
     EngineClient,
@@ -81,7 +82,8 @@ def _fail(message: str, code: int = 1, error: str = "error", **extra) -> int:
 
     stderr 仍写人读提示（不重复 JSON），可以安全地丢弃。
     """
-    payload: dict = {"ok": False, "error": error, "detail": message.strip()}
+    payload: dict = {"schema": "engine-cli/error/v1", "ok": False,
+                     "error": error, "detail": message.strip()}
     payload.update(extra)
     _out(payload)
     sys.stderr.write(message.rstrip() + "\n")
@@ -138,7 +140,87 @@ def _send_checked(name: str, args: dict) -> dict:
 # ── 子命令 ──
 
 
-def cmd_ops(_ns) -> int:
+def _json_scalar(value):
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_json_scalar(v) for v in value]
+    return None
+
+
+def _arg_manifest(action) -> dict:
+    """argparse action → 稳定参数描述（跳过 help/func 等内部项）。"""
+    if isinstance(action, argparse._HelpAction) or action.dest in ("func",):
+        return {}
+    choices = None
+    if action.choices:
+        choices = sorted(str(c) for c in action.choices)
+    type_name = None
+    if action.type is not None:
+        type_name = getattr(action.type, "__name__", "custom")
+    return {
+        "dest": action.dest,
+        "flags": list(action.option_strings),
+        "required": bool(getattr(action, "required", False)),
+        "default": _json_scalar(action.default),
+        "choices": choices,
+        "type": type_name,
+        "nargs": action.nargs if isinstance(action.nargs, (str, int, type(None))) else None,
+        "help": getattr(action, "help", "") or "",
+    }
+
+
+def _command_manifest(parser: argparse.ArgumentParser) -> list[dict]:
+    sub = next((a for a in parser._actions
+                if isinstance(a, argparse._SubParsersAction)), None)
+    if sub is None:
+        return []
+    help_map = {a.dest: (a.help or "") for a in sub._choices_actions}
+    by_parser: dict[int, dict] = {}
+    order: list[dict] = []
+    for name, child in sub.choices.items():
+        key = id(child)
+        if key not in by_parser:
+            item = {
+                "name": name,
+                "aliases": [],
+                "summary": help_map.get(name, ""),
+                "args": [_arg_manifest(a) for a in child._actions if _arg_manifest(a)],
+            }
+            by_parser[key] = item
+            order.append(item)
+        elif name != by_parser[key]["name"]:
+            by_parser[key]["aliases"].append(name)
+    return order
+
+
+def build_manifest(include_internal: bool = False) -> dict:
+    """engine-cli/manifest/v1 — CLI + op 的机器可读单一事实源。
+
+    消费方: agent 首次发现、MCP/skill 生成、contract 测试。
+    """
+    return {
+        "schema": "engine-cli/manifest/v1",
+        "entrypoint": "engine-editor-cli",
+        "version": __version__,
+        "invocation": "engine-editor-cli <command> ... | engine-editor-cli call <op> k=v ...",
+        "exit_codes": {"0": "success", "1": "runtime/op error", "2": "usage error"},
+        "error": {
+            "stream": "stdout",
+            "schema": "engine-cli/error/v1",
+            "fields": ["schema", "ok", "error", "detail"],
+        },
+        "ops": op_registry.manifest_ops(include_internal=include_internal),
+        "commands": _command_manifest(build_parser()),
+        "aliases": op_registry.manifest_aliases(),
+        "topics": sorted(op_registry.TOPIC_HELP),
+    }
+
+
+def cmd_ops(ns) -> int:
+    if getattr(ns, "json", False):
+        _out(build_manifest(include_internal=bool(getattr(ns, "include_internal", False))))
+        return 0
     print(op_registry.format_ops_list())
     return 0
 
@@ -274,12 +356,16 @@ def cmd_validate(ns) -> int:
             graph = _load_json_arg(ns.graph)
         except (OSError, ValueError) as e:
             return _fail(f"--graph 解析失败: {e}", 2)
+    dt = ns.dt if ns.dt and ns.dt > 0 else (1.0 / ns.fps if ns.fps and ns.fps > 0 else 0.0)
     result = validate_graph_orchestrate(
         source=ns.source,
         graph=graph,
         frames=ns.frames,
+        dt=dt,
         verbose=bool(ns.verbose),
         seed=ns.seed,
+        realtime=bool(ns.realtime),
+        allow_long=bool(ns.allow_long),
         save_path=ns.save,
         timeout_s=ns.timeout,
     )
@@ -430,72 +516,327 @@ def cmd_probe(ns) -> int:
     return 0
 
 
+_AGENTS_BEGIN = agent_docs.AGENTS_BEGIN
+_AGENTS_END = agent_docs.AGENTS_END
+_AGENTS_HEADER = "# Agent Notes"
+
+
 def _skill_source() -> Path:
     return Path(__file__).resolve().parent / "skills" / _SKILL_DIR_NAME
 
-def _update_mcp_json(path: Path, python_cmd: str, profile: str, uninstall: bool,
-                     port: int | None = None, engine_root: str | None = None) -> None:
+
+def _targets_candidates() -> list[Path]:
+    here = Path(__file__).resolve().parent
+    return [
+        here / "agent_targets.json",
+        here.parents[3] / "agent" / "targets.json",
+    ]
+
+
+_FALLBACK_TARGETS = {
+    "vscode": {
+        "label": "VS Code / GitHub Copilot",
+        "detect": [".vscode"],
+        "mcp": {"path": ".vscode/mcp.json", "root_key": "servers", "type": "stdio"},
+        "skills": [".github/skills"],
+        "instructions": "AGENTS.md",
+    },
+    "claude": {
+        "label": "Claude Code",
+        "detect": [".claude"],
+        "mcp": {"path": ".mcp.json", "root_key": "mcpServers", "type": None},
+        "skills": [".claude/skills"],
+        "instructions": "AGENTS.md",
+    },
+    "generic": {
+        "label": "Generic terminal agent",
+        "detect": [],
+        "mcp": None,
+        "skills": [],
+        "instructions": "AGENTS.md",
+    },
+}
+
+
+def _load_targets() -> dict:
+    for path in _targets_candidates():
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data.get("targets"), dict) and data["targets"]:
+            return data
+    return {"schema": "flyvibing-agent-targets/v1", "version": 0,
+            "default": "auto", "targets": _FALLBACK_TARGETS}
+
+
+def _resolve_target_names(raw: list[str] | None, ws: Path, targets: dict) -> list[str]:
+    requested: list[str] = []
+    for item in raw or []:
+        requested.extend(x.strip() for x in str(item).split(",") if x.strip())
+    if not requested:
+        requested = ["auto"]
+
+    names: list[str] = []
+
+    def add(name: str) -> None:
+        if name and name not in names:
+            names.append(name)
+
+    for name in requested:
+        if name == "all":
+            for key in targets:
+                add(key)
+        elif name == "auto":
+            for key, spec in targets.items():
+                if key == "generic":
+                    continue
+                for marker in spec.get("detect") or []:
+                    if (ws / marker).exists():
+                        add(key)
+                        break
+            add("generic")
+        elif name in targets:
+            add(name)
+        else:
+            available = ", ".join(["auto", "all", *targets])
+            raise ValueError(f"unknown target {name!r}; 可用: {available}")
+    return names
+
+
+def _legacy_skill_dirs(ns) -> list[str]:
+    choice = getattr(ns, "skills", None)
+    if not choice or choice == "none":
+        return []
+    if choice == "all":
+        return list(_SKILL_TARGETS.values())
+    return [_SKILL_TARGETS[choice]] if choice in _SKILL_TARGETS else []
+
+
+def _mcp_entry(python_cmd: str, profile: str, port: int | None,
+               engine_root: str | None, type_value: str | None) -> dict:
+    args = ["-m", "engine_editor_mcp", "--profile", profile]
+    if port is not None:
+        args += ["--port", str(port)]
+    entry = {"command": python_cmd, "args": args}
+    if type_value:
+        entry["type"] = type_value
+    if engine_root:
+        entry["env"] = {"MGE_ENGINE_ROOT": os.path.abspath(engine_root)}
+    return entry
+
+
+def _update_mcp_json(path: Path, spec: dict, entry: dict | None,
+                     uninstall: bool) -> dict:
+    """合并/移除一个 MCP server 条目；返回 path/root_key/entry。"""
     data: dict = {}
     if path.is_file():
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except ValueError:
             data = {}
-    servers = data.setdefault("servers", {})
+    root_key = str(spec.get("root_key") or "servers")
+    servers = data.setdefault(root_key, {})
     if uninstall:
         servers.pop("engine-editor-live", None)
-    else:
-        args = ["-m", "engine_editor_mcp", "--profile", profile]
-        if port is not None:
-            args += ["--port", str(port)]
-        entry = {
-            "type": "stdio",
-            "command": python_cmd,
-            "args": args,
-        }
-        if engine_root:
-            entry["env"] = {"MGE_ENGINE_ROOT": os.path.abspath(engine_root)}
+    elif entry is not None:
         servers["engine-editor-live"] = entry
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(f"[mcp] {path}")
-    if not uninstall:
-        extra = f" --port {port}" if port is not None else ""
-        print(f"[mcp] command: {python_cmd} -m engine_editor_mcp --profile {profile}{extra}")
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+                    encoding="utf-8")
+    return {"path": str(path), "root_key": root_key, "entry": entry}
+
+
+def _agents_block(skill_dirs: list[str]) -> str:
+    return agent_docs.render_agents_block(skill_dirs)
+
+
+def _write_agents_md(path: Path, block: str) -> None:
+    if path.is_file():
+        text = path.read_text(encoding="utf-8")
+    else:
+        text = _AGENTS_HEADER + "\n\n"
+    if _AGENTS_BEGIN in text and _AGENTS_END in text:
+        before, rest = text.split(_AGENTS_BEGIN, 1)
+        _, after = rest.split(_AGENTS_END, 1)
+        text = before.rstrip() + "\n\n" + block + after
+    else:
+        text = text.rstrip() + "\n\n" + block + "\n"
+    path.write_text(text, encoding="utf-8")
+
+
+def _remove_agents_md(path: Path) -> None:
+    if not path.is_file():
+        return
+    text = path.read_text(encoding="utf-8")
+    if _AGENTS_BEGIN not in text or _AGENTS_END not in text:
+        return
+    before, rest = text.split(_AGENTS_BEGIN, 1)
+    _, after = rest.split(_AGENTS_END, 1)
+    text = (before.rstrip() + "\n" + after.lstrip()).strip()
+    if text in ("", _AGENTS_HEADER):
+        path.unlink(missing_ok=True)
+    else:
+        path.write_text(text + "\n", encoding="utf-8")
+
+
+def _setup_plan(target_names: list[str], targets: dict,
+                legacy_dirs: list[str]) -> dict:
+    skill_dirs: list[str] = []
+    mcp_items: list[dict] = []
+    instructions: list[str] = []
+    for name in target_names:
+        spec = targets[name]
+        for rel in spec.get("skills") or []:
+            if rel not in skill_dirs:
+                skill_dirs.append(str(rel))
+        if spec.get("mcp"):
+            mcp_items.append({"target": name, "spec": dict(spec["mcp"])})
+        rel = spec.get("instructions")
+        if rel and rel not in instructions:
+            instructions.append(str(rel))
+    for rel in legacy_dirs:
+        if rel not in skill_dirs:
+            skill_dirs.append(str(rel))
+    return {
+        "targets": target_names,
+        "skill_dirs": skill_dirs,
+        "mcp_items": mcp_items,
+        "instructions": instructions,
+    }
 
 
 def cmd_setup(ns) -> int:
     ws = Path(ns.workspace or os.getcwd()).expanduser().resolve()
-    src = _skill_source()
-    if not ns.uninstall and not src.is_dir():
-        return _fail(f"skill payload missing in package: {src}", 1)
-    targets = list(_SKILL_TARGETS) if ns.skills == "all" else ([] if ns.skills == "none" else [ns.skills])
-    python_cmd = ns.python or sys.executable
-    mcp_path = ws / ".vscode" / "mcp.json"
+    if not ws.is_dir():
+        return _fail(f"workspace does not exist: {ws}", 2)
+    data = _load_targets()
+    targets = data["targets"]
+    try:
+        target_names = _resolve_target_names(ns.target, ws, targets)
+    except ValueError as e:
+        return _fail(f"setup: {e}", 2)
 
-    if ns.dry_run:
-        for name in targets:
-            print(f"[dry-run] skill -> {ws / _SKILL_TARGETS[name] / _SKILL_DIR_NAME}")
-        print(f"[dry-run] mcp   -> {mcp_path} (profile={ns.profile}, python={python_cmd}, "
-              f"port={ns.mcp_port or 'default'}, engine_root={ns.engine_root or 'auto'})")
+    plan = _setup_plan(target_names, targets, _legacy_skill_dirs(ns))
+    skill_src = _skill_source()
+    if not ns.uninstall and plan["skill_dirs"] and not skill_src.is_dir():
+        return _fail(f"skill payload missing in package: {skill_src}", 1)
+
+    python_cmd = ns.python or sys.executable
+    actions: list[dict] = []
+    for name in plan["targets"]:
+        spec = targets[name]
+        for rel in spec.get("skills") or []:
+            actions.append({"action": "skill", "target": name,
+                            "path": str(ws / rel / _SKILL_DIR_NAME)})
+        if spec.get("mcp"):
+            m = spec["mcp"]
+            entry = _mcp_entry(python_cmd, ns.profile, ns.mcp_port, ns.engine_root,
+                               m.get("type"))
+            actions.append({"action": "mcp", "target": name,
+                            "path": str(ws / m["path"]),
+                            "root_key": m.get("root_key", "servers"),
+                            "entry": entry})
+    for rel in plan["skill_dirs"]:
+        path = str(ws / rel / _SKILL_DIR_NAME)
+        if not any(a["action"] == "skill" and a["path"] == path for a in actions):
+            actions.append({"action": "skill", "target": "legacy", "path": path})
+    for rel in plan["instructions"]:
+        actions.append({"action": "agents", "path": str(ws / rel)})
+
+    # 多 target 可能命中同一 skill 目录（vscode + github）：按 (action, path) 去重。
+    unique: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for action in actions:
+        key = (action["action"], action["path"])
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(action)
+    actions = unique
+
+    block = _agents_block(plan["skill_dirs"])
+    result = {
+        "schema": "engine-setup/v1",
+        "workspace": str(ws),
+        "targets": plan["targets"],
+        "actions": actions,
+        "dry_run": bool(ns.dry_run or ns.print),
+        "print": bool(ns.print),
+        "uninstall": bool(ns.uninstall),
+        "written": False,
+    }
+
+    if ns.print:
+        if ns.json:
+            _out(result)
+            return 0
+        print(f"[workspace] {ws}")
+        for name in plan["targets"]:
+            print(f"[target] {name} — {targets[name].get('label', name)}")
+        for action in actions:
+            if action["action"] == "skill":
+                print(f"[skill] {action['path']}")
+            elif action["action"] == "mcp":
+                print(f"[mcp] {action['path']} (root_key={action['root_key']})")
+                print(json.dumps(
+                    {action["root_key"]: {"engine-editor-live": action["entry"]}},
+                    indent=2, ensure_ascii=False))
+            elif action["action"] == "agents":
+                print(f"[agents] {action['path']}")
+                print(block)
         return 0
 
-    print(f"[workspace] {ws}")
+    if ns.dry_run:
+        if ns.json:
+            _out(result)
+            return 0
+        print(f"[workspace] {ws}")
+        for action in actions:
+            print(f"[dry-run] {action['action']:<6} {action['path']}")
+        return 0
+
     if ns.uninstall:
-        for name in targets:
-            dest = ws / _SKILL_TARGETS[name] / _SKILL_DIR_NAME
-            shutil.rmtree(dest, ignore_errors=True)
-            print(f"[remove] {dest}")
-        _update_mcp_json(mcp_path, python_cmd, ns.profile, uninstall=True, port=ns.mcp_port)
+        for action in actions:
+            if action["action"] == "skill":
+                shutil.rmtree(Path(action["path"]), ignore_errors=True)
+            elif action["action"] == "mcp":
+                spec = next(m["spec"] for m in plan["mcp_items"]
+                            if m["target"] == action["target"])
+                _update_mcp_json(Path(action["path"]), spec, None, uninstall=True)
+            elif action["action"] == "agents":
+                _remove_agents_md(Path(action["path"]))
     else:
-        for name in targets:
-            dest = ws / _SKILL_TARGETS[name] / _SKILL_DIR_NAME
-            if dest.exists():
-                shutil.rmtree(dest)
-            shutil.copytree(src, dest)
-            print(f"[skill] {dest}")
-        _update_mcp_json(mcp_path, python_cmd, ns.profile, uninstall=False,
-                         port=ns.mcp_port, engine_root=ns.engine_root)
+        done: set[str] = set()
+        for action in actions:
+            if action["action"] == "skill":
+                dest = Path(action["path"])
+                if action["path"] in done:
+                    continue
+                if dest.exists():
+                    shutil.rmtree(dest)
+                shutil.copytree(skill_src, dest)
+                done.add(action["path"])
+            elif action["action"] == "mcp":
+                spec = next(m["spec"] for m in plan["mcp_items"]
+                            if m["target"] == action["target"])
+                _update_mcp_json(Path(action["path"]), spec, action["entry"],
+                                 uninstall=False)
+            elif action["action"] == "agents":
+                _write_agents_md(Path(action["path"]), block)
+
+    result["written"] = True
+    if ns.json:
+        _out(result)
+        return 0
+    print(f"[workspace] {ws}")
+    for name in plan["targets"]:
+        print(f"[target] {name} — {targets[name].get('label', name)}")
+    for action in actions:
+        verb = "remove" if ns.uninstall else "write"
+        print(f"[{verb}] {action['action']:<6} {action['path']}")
     print("[note] 重载 IDE 窗口（或 MCP: List Servers 重启）后生效")
     return 0
 
@@ -516,7 +857,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="编辑器监听端口（放在子命令前; 默认 env MGE_EDITOR_MCP_PORT 或 8977）")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("ops", help="op 目录（一行一个）")
+    p = sub.add_parser("ops", help="op 目录（一行一个；--json 输出机器可读 manifest）")
+    p.add_argument("--json", action="store_true", help="输出 engine-cli/manifest/v1")
+    p.add_argument("--include-internal", action="store_true", help="包含内部 op（默认排除）")
     p.set_defaults(func=cmd_ops)
 
     p = sub.add_parser("help", help="单 op 详情 / 主题（cli, probe, exitcodes, mcp, skill, capture）")
@@ -546,6 +889,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--source", choices=("canvas", "graph"), default="canvas")
     p.add_argument("--graph", help="graph dict JSON（或 @file.json; source=graph 用）")
     p.add_argument("--frames", type=int, default=360)
+    p.add_argument("--dt", type=float, default=0.0, help="显式 fake-time 步长；0=引擎默认（1/60）")
+    p.add_argument("--fps", type=float, default=0.0, help="按 fps 指定步长（优先于默认，--dt 优先）")
+    p.add_argument("--realtime", action="store_true",
+                   help="wall-clock 实速干跑（暴露调度抖动；默认 fake-time）")
+    p.add_argument("--allow-long", action="store_true",
+                   help="允许 realtime 超过 10 s（默认拒绝）")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--verbose", action="store_true")
     p.add_argument("--detail", choices=("summary", "full"), default="summary")
@@ -578,15 +927,21 @@ def build_parser() -> argparse.ArgumentParser:
                    help="topic[#节序号或标题片段] / 区名 / 搜索词 / 工具名; 例: dev/project_export_protocol#3 或 tool test_runner")
     p.set_defaults(func=cmd_doc)
 
-    p = sub.add_parser("setup", help="向工作区安装 skill + mcp.json（独立分发）")
+    p = sub.add_parser("setup", help="向工作区安装 skill + MCP 配置（多平台 target）")
     p.add_argument("--workspace", default=".", help="目标工作区（默认当前目录）")
     p.add_argument("--profile", choices=("lite", "full"), default="lite", help="MCP 档位（默认 lite）")
     p.add_argument("--python", default="", help="MCP 启动用的 Python 解释器（默认当前解释器）")
     p.add_argument("--port", dest="mcp_port", type=int, default=None,
-                   help="写入 mcp.json 的固定端口（多 agent 时每个工作区配不同端口）")
+                   help="写入 MCP 配置的固定端口（多 agent 时每个工作区配不同端口）")
     p.add_argument("--engine-root", "--engine", dest="engine_root", default=None,
-                   help="写入 mcp.json 的 MGE_ENGINE_ROOT（便于 engine_launch 跨工作区启动）")
-    p.add_argument("--skills", choices=("github", "claude", "agents", "all", "none"), default="github")
+                   help="写入 MCP 配置的 MGE_ENGINE_ROOT（便于 engine_launch 跨工作区启动）")
+    p.add_argument("--target", action="append", default=[],
+                   help="平台目标：auto / all / vscode / claude / cursor / github / codex / generic（可重复或逗号分隔）")
+    p.add_argument("--skills", choices=("github", "claude", "agents", "all", "none"), default=None,
+                   help="兼容旧参数：额外安装 skill 目录（不决定 MCP 目标）")
+    p.add_argument("--print", action="store_true",
+                   help="只打印配置片段/skill 路径，不写盘（适合未内置支持的客户端）")
+    p.add_argument("--json", action="store_true", help="输出 engine-setup/v1 结构化结果")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--uninstall", action="store_true")
     p.set_defaults(func=cmd_setup)

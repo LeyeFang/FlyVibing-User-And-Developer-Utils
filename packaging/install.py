@@ -112,7 +112,7 @@ def _setup_command(workspace: Path, profile: str) -> list[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--workspace", help="workspace to receive skill + mcp.json")
+    parser.add_argument("--workspace", help="workspace to receive skills + MCP config + AGENTS.md")
     parser.add_argument("--profile", choices=("lite", "full"), default="lite")
     parser.add_argument("--no-setup", action="store_true",
                         help="install packages only; do not write workspace files")
@@ -199,7 +199,7 @@ def main() -> int:
     if setup_cmd is None:
         print()
         print("Next: register a workspace with:")
-        print(f'  "{sys.executable}" -m engine_editor_mcp.cli setup --workspace <project>')
+        print(f'  "{sys.executable}" -m engine_editor_mcp.cli setup --workspace <project> --target auto')
     else:
         print("[note] reload the IDE window (or restart MCP servers) to load the tools")
     return 0

@@ -1,0 +1,19 @@
+# FlyVibing Tools
+
+> CLI-first agent toolchain for MyGameEngine: 实时编辑器控制 + 离线节点图。
+> 命令清单是机器可读的；MCP 只是可选适配层。
+
+## Manifests
+- `engine-editor-cli ops --json` — engine-cli/manifest/v1
+- `flyvibing-node-editor schema` — flyvibing-node-editor/manifest/v1
+- `agent/targets.json` — flyvibing-agent-targets/v1（setup --target）
+
+## Skills
+- [engine-editor](skills/engine-editor/SKILL.md) — 实时编辑器 CLI/MCP
+- [node-graph](skills/node-graph/SKILL.md) — 离线节点图 spec→scene
+
+## Docs
+- [Agent onboarding](agent/onboarding.md)
+- [Tutorial](docs/TUTORIAL.md)
+- [README](README.md)
+- [Install](packaging/README-INSTALL.md)

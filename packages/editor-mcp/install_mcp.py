@@ -13,6 +13,8 @@ Engine Editor Live MCP — 一键安装（跨平台）。
 
 注册到工作区 .vscode/mcp.json（名称: engine-editor-live）并把 engine-editor Skill
 同步到 <仓库>/.github/skills/engine-editor/（渐进披露; 编辑器内 AI 直接可用）。
+这是 dev 仓库内的 VS Code 快捷安装；需要多客户端（Claude/Cursor/AGENTS.md）时用
+`engine-editor-cli setup --workspace <dir> --target auto`。
 安装后需重载 VS Code 窗口（或 MCP: List Servers → 重启）才能被 agent 看到。
 """
 

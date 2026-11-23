@@ -497,7 +497,7 @@ SettingsPanel.unregister_pages_by_owner("ext_x")  # 扩展卸载保险丝（与 
 | `settings.get` | `{key?}` 省略 key = 全量；UI 同路径 = 面板自身（只读，D） |
 | `settings.set` | `{key, value}` → 校验+钳制 + 落盘 + **下一渲染帧**生效（D + Q）；`server.port` 例外：下次启动才重建监听 |
 
-三方一致（§10 表 ↔ `ops.py` ↔ `_register_ops`）由 `test_action_contract.py` 守卫（60 op）。
+三方一致（§10 表 ↔ `ops.py` ↔ `_register_ops`）由 `test_action_contract.py` 守卫（82 op）。
 
 ### 13.6 测试
 

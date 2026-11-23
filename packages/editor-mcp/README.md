@@ -30,20 +30,26 @@ pip install -e packages/editor-mcp
 工具链发行版 zip（`FlyVibing-Tools-0.5.0.zip`）内含三个 wheel 和一键安装脚本：
 解压后双击 `install.cmd`，或执行 `sh install.sh`。
 
-## 在三方工作区启用（任意 IDE）
+## 在三方工作区启用（任意客户端）
 
-```powershell
-# 一条命令：拷贝 Skill（.github/skills/engine-editor/）+ 合并 .vscode/mcp.json（lite 档）
+```text
+# 默认 auto：检测 .vscode/.claude/.cursor/.github，并至少生成 AGENTS.md 通用入口
 engine-editor-cli setup --workspace C:\path\to\your-experiment-project
 ```
 
-- `--skills claude|agents|all|none` 选择 Skill 目标目录（默认 `.github/skills`）；
+- `--target auto|all|vscode|claude|cursor|github|codex|generic`（可重复或逗号分隔）。
+  `auto` 只检测已存在目录，不猜；`generic` 只写 `AGENTS.md`。
+- `--print` 只打印 MCP 片段 / skill 路径，不写盘；适合未内置支持的客户端。
+- 配置按客户端分开：VS Code 用 `.vscode/mcp.json` 的 `servers`，Claude/Cursor 用
+  `mcpServers`。不再假设一份 JSON 能通吃所有客户端。
+- `AGENTS.md` 用 `<!-- flyvibing:begin/end -->` 标记块，可重复执行，不覆盖用户内容。
+- `--skills github|claude|agents|all|none` 是兼容旧版的 skill 目录覆盖；新项目优先用 `--target`。
 - `--profile full` 用旧 45 个 `editor_*` 工具 + `engine_launch`；`--python <exe>` 指定 MCP 启动解释器；
-- `--port N` 固定该工作区的 MCP 端口（多 agent 时每个工作区不同）；`--engine-root DIR` 写入
-  `MGE_ENGINE_ROOT`，方便在任意工作区调用 `engine_launch`；
-- `--dry-run` 预览；`--uninstall` 卸载（移除 Skill + mcp.json 条目）。
+- `--port N` 固定该工作区的 MCP 端口；`--engine-root DIR` 写入 `MGE_ENGINE_ROOT`；
+- `--dry-run` 预览；`--uninstall` 移除 Skill + MCP 条目 + `AGENTS.md` 标记块。
 
 不用 MCP 的平台也可以只用 CLI：终端里 `engine-editor-cli call sim.state`。
+CLI 的命令清单：`engine-editor-cli ops --json`（`engine-cli/manifest/v1`）。
 
 ## 启动引擎（自动端口，多引擎友好）
 
@@ -74,7 +80,7 @@ MCP lite/full 都有 `engine_launch(engine_root=..., port="auto", language="zh",
 ## CLI 速览
 
 ```powershell
-engine-editor-cli ops                      # op 目录（70 个核心 op）
+engine-editor-cli ops                      # op 目录（80 个核心 op）
 engine-editor-cli call graph.group.merge nodes=[2,3]   # 选中节点合并为组
 engine-editor-cli call graph.group.ungroup group=g1    # 拆分组框（保留节点）
 engine-editor-cli help entity.transform    # 单 op 详情（参数 + 示例）
@@ -82,11 +88,17 @@ engine-editor-cli call entity.add name=MCP_Cue
 engine-editor-cli call entity.transform id=5 position='[1,0,2]'   # 数组/对象加引号
 engine-editor-cli batch ops.json           # 顺序批处理（- = stdin）
 engine-editor-cli exec script.py           # 脚本模式（注入 engine 客户端, 可过滤输出 -> 省 token）
-engine-editor-cli validate                 # 图干跑校验（默认 summary）
+engine-editor-cli validate                 # 图干跑校验（默认 summary；fake-time 1/60）
+engine-editor-cli validate --fps 240 --frames 2400        # fake-time 高频复测
+engine-editor-cli validate --realtime --frames 240        # wall-clock 实速，暴露调度抖动
 engine-editor-cli capture pie --out f.png  # 抓帧落盘（只回路径）
 engine-editor-cli launch --port auto       # 启动引擎 + 自动端口握手
 engine-editor-cli engines                  # 发现运行中的编辑器
 ```
+
+`validate` 的报告始终带 `timebase`：`mode` / `fps` / `dt` / `modes` / `hint`
+（realtime 另带 `measured` 的 fps 与 dt p50/p95/max）。fake-time 低于 120 fps 或 realtime
+都会在 `timebase.warning` 中提示局限；realtime 默认拒绝 >10 s，需 `--allow-long`。
 
 值解析：先按 JSON（数字/true/false/数组/对象/带引号字符串），失败按纯字符串。
 退出码：0 成功 / 1 引擎或运行时错误 / 2 用法错误。
