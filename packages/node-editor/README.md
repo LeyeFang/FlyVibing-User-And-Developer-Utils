@@ -14,6 +14,13 @@ python -m flyvibing_node_editor.cli flow   <scene> --event OnFrameUpdate   # 静
 python -m flyvibing_node_editor.cli pins   TimeTrigger                     # 节点 pin 契约
 python -m flyvibing_node_editor.cli find   --scene <scene> --type Constant --prop value=60  # 定位节点
 python -m flyvibing_node_editor.cli find   --scene <scene> --alias trial_end                # 按别名定位
+python -m flyvibing_node_editor.cli query  --scene <scene> --from @tt9 --direction down --depth 3 --groups auto  # 组感知链路
+python -m flyvibing_node_editor.cli expand --scene <scene> --group @flicker_9hz --nested opaque             # 展开组内部
+python -m flyvibing_node_editor.cli patch  --scene <scene> --patch ops.json [--write] [--expect-hash SHA]  # 事务式补丁
+python -m flyvibing_node_editor.cli link   --scene <scene> --from @a.Value --to @b.In_0 [--write]           # 连线
+python -m flyvibing_node_editor.cli unlink --scene <scene> --from @a.Value --to @b.In_0 [--write]           # 断线
+python -m flyvibing_node_editor.cli simulate --scene <scene> --group @g --seconds 8 --fps 240 --var vis9  # 模拟/探针
+python -m flyvibing_node_editor.cli schema                                            # 机器可读命令清单
 python -m flyvibing_node_editor.cli groups                                # 内置组模板
 python -m flyvibing_node_editor.cli groups --scene <scene>                # 场景内组实例
 python -m flyvibing_node_editor.cli group-merge --scene <scene> --nodes 2,3 --write            # 选中节点合并为组
@@ -25,22 +32,40 @@ python -m flyvibing_node_editor.cli apply-ops --scene <scene> --ops ops.json [--
 同一能力经 MCP 暴露（`node-graph-editor`：`get_rules` / `get_scene_entities` / `build_graph` / `apply_graph`）；
 装法见 `install_mcp.py`（或 `install_mcp.bat`）。
 
+## 机器可读契约（agent / 工具生成）
+
+```text
+flyvibing-node-editor schema            # JSON: flyvibing-node-editor/manifest/v1
+flyvibing-node-editor schema --format text
+```
+
+- manifest 列出所有子命令、参数、默认值、choices 和退出码，供 agent 发现与适配器生成。
+- 失败时 stdout 也是 JSON：`{"schema":"node-cli/error/v1","ok":false,"error":"...","detail":"..."}`；
+  stderr 保留人读提示，可安全丢弃。
+- 图输出 schema：`graph-query/v1` / `graph-patch/v1` / `graph-sim/v1`，均带 `graph_hash` 或时间基元数据。
+
 ## 文件
 
 | 文件 | 作用 |
 |---|---|
-| `cli.py` | 命令行入口（rules / entities / build / apply / flow / pins / find / group-*） |
+| `cli.py` | 命令行入口（rules / entities / build / apply / flow / query / expand / patch / link / unlink / simulate / pins / find / group-*） |
 | `rule_sections.py` + `rules.md` | 节点图规则参考（**按节读取**，避免一次性灌满上下文） |
 | `spec_builder.py` | 实验 spec → 节点图（trial 计时器/相位/分支/触发编码） |
 | `graph_builder.py` | 节点图数据结构与连线 |
 | `node_graph_validator.py` | **校验唯一实现**：L1 规则（`check_graph`）+ 兼容入口 `validate_static`；L2 干跑委托引擎 `validation.dry_run` |
 | `graph_flow.py` | **静态执行流（V1）**：不执行引擎，输出“从某事件出发的真实执行顺序”（含 Branch 分支、TimeTrigger 门控、环检测） |
+| `graph_query.py` | **组感知链路查询 / 组展开**：`query` / `expand`，组黑盒 + 边界端口 + `graph-query/v1` |
+| `graph_patch.py` | **事务式补丁**：`patch` / `link` / `unlink`，`expected_hash`、L1 阻断、结构化 diff |
+| `graph_sim.py` | **模拟/探针**：fake-time + realtime 双时基，整图执行 + 组/节点过滤，props/pin 注入，实测 Hz/duty |
 | `apply_graph.py` | 把图注入 `.scene` |
-| `ops.py` | **增量编辑**（link / unlink / set_props / add_node / remove_node / set_alias / set_description / add_group / set_group / merge_group / ungroup_group / delete_group），供 `apply-ops` 与分步 agent 使用 |
+| `ops.py` | **增量编辑**（link / unlink / set_props / add_node(+pos) / remove_node / set_alias / set_description / set_pos / set_group_meta / add_group / set_group / merge_group(+title/description) / ungroup_group / delete_group），供 `apply-ops` 与 patch 共用 |
 | `node_groups.py` | **节点组**：模板注册（`cue_n_way` / `cue_window` / `hide_group` / `container` / `mi_select` / `phase0_trigger` / `sss_pulse`）、扁平展开、按 arm 差分重展开 |
 | `mcp_server.py` | MCP 服务端（stdio） |
 | `test_smoke.py` | 冒烟自测 |
 | `test_aliases_groups.py` | 别名 + 节点组（cue_n_way / cue_window / hide_group / container / mi_select / phase0_trigger / sss_pulse）自测 |
+| `test_query.py` | 链路查询 / 组展开自测（组黑盒、auto 焦点、边界端口、截断） |
+| `test_patch.py` | 补丁 / 连线 / 断线 / hash 冲突 / L1 阻断自测 |
+| `test_sim.py` | 模拟自测（变量计数、组范围、可见性、trace、注入、双时基、低帧率警告） |
 
 ## 校验（离线，与在线同源）
 
@@ -71,7 +96,90 @@ python -m flyvibing_node_editor.cli flow --scene <scene.scene> --from 281 --data
 构图前若不确定 pin 名，用 `pins <TypeName>` 查（含方向、数据类型、`optional` 标记）；
 定位某类/某值的节点用 `find --scene ... [--type T] [--prop K=V]`。
 
+## 链路查询与组展开（agent 首选）
+
+`query` / `expand` 面向 agent 的“局部理解”场景：不需要把整张 `.scene` 读进上下文。
+
+```text
+# 从节点出发查上下游；起点所在的组透明，其它组只报告组（默认 auto）
+python -m flyvibing_node_editor.cli query --scene X --from @set_vis9 --direction both --depth 3 --groups auto
+
+# 严格组黑盒：经过组只回组 + 边界端口
+python -m flyvibing_node_editor.cli query --scene X --from @seq --groups opaque --edges exec
+
+# 展开一个组；子组默认继续黑盒
+python -m flyvibing_node_editor.cli expand --scene X --group @flicker_9hz --nested opaque
+
+# 读裸 graph JSON（build / graph.export 的产物），不依赖 .scene
+python -m flyvibing_node_editor.cli query --graph graph.json --from @seq --depth 2
+```
+
+- `--direction down|up|both`；`--edges exec|data|all`；`--depth` 按边数；`--max-nodes` 截断。
+- `--data-direction inputs|outputs|both`：数据边默认 `inputs`（从消费者回溯生产者）；找消费者用 `outputs`。
+- `--groups auto`（默认）：起点节点所在组透明，其余组黑盒；`opaque` 全黑盒；`expand` 全节点。
+- 组的边界端口会给出 `entry` / `done`（若可推断）以及 `data_in` / `data_out`，并附带外部来源。
+- 输出 schema 为 `graph-query/v1`，带 `graph_hash`、`nodes`、`groups_list`、`edges`、`boundary`、`truncated`；`--format text` 输出组端口 + 节点 + 边的紧凑文本。
+- `expand` 返回组内 `edges` 与 `boundary`（组内外各一端的边），方便判断组如何接入父图。
+
+## 事务式补丁（写侧 agent 首选）
+
+```text
+# 默认 dry-run：只回 hash 与 diff，不落盘
+python -m flyvibing_node_editor.cli patch --scene X --patch ops.json --expect-hash sha1:...
+
+# 校验通过后原子写回
+python -m flyvibing_node_editor.cli patch --scene X --patch ops.json --expect-hash sha1:... --write
+
+# 单条连线 / 断线
+python -m flyvibing_node_editor.cli link   --scene X --from @gate9.Result --to @apply9.Visible --write
+python -m flyvibing_node_editor.cli unlink --scene X --from @gate9.Result --to @apply9.Visible --write
+```
+
+- ops 与 `apply-ops` 同源；额外支持 `add_node.pos` / `set_pos` / `set_group_meta`，`merge_group` 可带 `title` / `description`。
+- `--expect-hash` 用 `query` 输出的 `graph_hash` 做乐观并发校验；不匹配直接拒绝。
+- 先应用 ops，再跑 L1 校验；op 错误或 L1 error 都不写盘。写盘用临时文件 + `os.replace`。
+- 返回 `graph-patch/v1`：`hash_before` / `hash_after` / `diff` / `validation` / `written`，不返回整张图。
+- `diff` 按节点/连线/组给出 added / removed / changed，供 agent 直接确认改动，不用重读整图。
+
+## 模拟 / 探针（graph-sim/v1）
+
+```text
+# 整图执行，只观测 @flicker_9hz；fake-time 240 fps（确定性）
+python -m flyvibing_node_editor.cli simulate --scene X --group @flicker_9hz \
+  --seconds 8 --fps 240 --var vis9 --pin @gate9.Result --format text
+
+# wall-clock 实速：暴露调度抖动；超过 10 s 需 --allow-long
+python -m flyvibing_node_editor.cli simulate --scene X --group @flicker_9hz \
+  --mode realtime --seconds 3 --format text
+
+# 自由运行：不设帧率上限，用上升沿实测闪烁频率（适合标定）
+python -m flyvibing_node_editor.cli simulate --scene X \
+  --nodes @flicker_9hz,@flicker_11hz --mode realtime --uncapped --seconds 7
+
+# 边界注入：改常量 + 强制数据节点输出
+python -m flyvibing_node_editor.cli simulate --scene X --group @flicker_9hz \
+  --seconds 6 --fps 240 --set-prop @half9.value=0.0555556 \
+  --stub @read_vis9.Value=1 --format text
+
+# 完整变化 trace 落盘，stdout 只回摘要
+python -m flyvibing_node_editor.cli simulate --scene X --group @flicker_9hz \
+  --seconds 8 --fps 240 --out trace.jsonl
+```
+
+- **整图执行，按 `--group` / `--nodes` 过滤观测**；组边界端口仍从原图取，不伪造输入。
+- 时间基三档：默认 `--mode fake`（240 fps 确定性）；`--mode realtime`（paced wall-clock）；`--mode realtime --uncapped`（不设帧率上限，跑多快算多快）。三条路径的文本和 JSON 都强制带 `timebase.modes` 与 `hint`。
+- `--uncapped` 适合实测闪烁频率：realtime 用实际 elapsed_time，频率从布尔信号的**上升沿周期**统计，并给出 `period_ms` / `period_jitter_ms`；默认限 10 s。
+- 观测 `--var` / `--timer` / `--pin`；可见性自动按 `EntitySetRenderVisible` 事件追踪。
+- 组/节点范围默认只回该范围读写/使用的变量与计时器；显式 `--var` / `--timer` 可强制观测。
+- `--set-var name=value` / `--set-timer name=value` 在 `OnGameStart` 后覆盖初值。
+- `--set-prop @node.key=value` 覆盖节点 props（常量、TimeTrigger 时间等）；`--stub` / `--inject @node.pin=value` 注入数据引脚：output pin 强制生产者值，input pin 直接覆盖边界读取（可测未连接输入）。
+- 摘要给出每个信号的 `transitions` / `median_interval` / `measured_hz` / `duty`（布尔信号），用来发现低频时间基导致的假结果。
+- fake 模式低于 120 fps 时给 aliasing 警告；realtime 模式固定提示"只含调度抖动，不含 GPU/渲染抖动"，渲染级问题仍需 PIE。realtime 默认拒绝 >10 s（`--allow-long` 覆盖）。
+- `--out` 写完整 JSONL trace（变化帧 + 有事件的帧）；stdout 不返回大数组。低层 API `python -m flyvibing_node_editor.graph_sim` 可复用。
+
 ## 增量改图（agent 分步）
+
+`apply-ops` 保留为低层接口；需要 `pos`、组元数据、`expected_hash` 或结构化 diff 时优先用上面的 `patch`。
 
 ```powershell
 python -m flyvibing_node_editor.cli apply-ops --scene <scene> --ops ops.json          # dry-run + L1 校验

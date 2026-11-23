@@ -113,6 +113,18 @@ def test_timer_warning() -> None:
     text2 = "\n".join(r2["lines"])
     check("显式关闭惰性创建 + 无 NewTimer: 警告", "[NO TIMER]" in text2, text2)
 
+    # TimeTrigger 只看到 SetTimer(create_if_missing=true) 时不应误报 NO TIMER
+    g = GraphBuilder()
+    _gs, fu, _gp = g.event_nodes()
+    st = g.node("SetTimer", ["exec_in", "exec_out", "Value"],
+                {"operate": "reset", "timer_name": "phase", "value": 0})
+    tt = g.time_triggers("phase", 0)[0]
+    g.link(fu, "exec", st, "exec_in")
+    g.link(st, "exec_out", tt, "exec_in")
+    r3 = analyze_flow(g.build(), event="OnFrameUpdate")
+    text3 = "\n".join(r3["lines"])
+    check("TimeTrigger + 惰性 SetTimer: 无假警告", "[NO TIMER]" not in text3, text3)
+
 
 def test_real_scene() -> None:
     scene = os.environ.get("MGE_MI_SCENE", "")

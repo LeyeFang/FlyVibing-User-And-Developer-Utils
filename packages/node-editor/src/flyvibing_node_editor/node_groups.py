@@ -1875,6 +1875,10 @@ def merge_group(scene: dict, op: dict) -> dict:
         "children": list(child_gids),
         "slots": {},
     }
+    for key in ("title", "description"):
+        value = op.get(key)
+        if value not in (None, ""):
+            groups[gid][key] = str(value)
     return {"ok": True, "errors": [], "scene": scene, "symbols": {},
             "gid": gid, "alias": alias, "nodes": len(selected)}
 

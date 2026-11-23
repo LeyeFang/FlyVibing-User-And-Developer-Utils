@@ -210,6 +210,14 @@ def analyze_flow(
         for nd in nodes.values()
         if nd.get("node_type") == "NewTimer"
     }
+    # SetTimer 默认 create_if_missing=true：它也是 timer 的创建者。
+    created_timers |= {
+        str((nd.get("props") or {}).get("timer_name")
+            or (nd.get("props") or {}).get("timer") or "")
+        for nd in nodes.values()
+        if nd.get("node_type") == "SetTimer"
+        and (nd.get("props") or {}).get("create_if_missing", True) is not False
+    }
 
     def _emit(depth: int, text: str) -> bool:
         nonlocal budget_exceeded

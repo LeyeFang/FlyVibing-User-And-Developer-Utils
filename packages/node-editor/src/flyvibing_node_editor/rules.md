@@ -467,3 +467,29 @@ ScalarMath.Result → VarSet("trigger_val", mode=pin)
 - 旧离线路径说明（2026-10-05）: 本 MCP 的 `validate_graph` 工具已移除；
   `node_graph_validator.py` / `GraphBuilder.validate()` 仅供旧脚本与单元测试复用，不再是推荐入口 —
   校验的单一事实源是引擎内服务（`Doc/Dev/graph_validation_protocol.md`）。
+
+### Timebase（必读）
+
+干跑有两条时基，报告里的 `timebase` 会同时声明两者：
+
+| 模式 | 用途 | 边界 |
+|---|---|---|
+| `fake`（默认，dt=1/60） | 确定性复现、CI、逻辑正确性 | 不产生帧抖动；低于 120 fps 可能把高频信号量化成假危险 |
+| `realtime` | 暴露调度抖动、验证时序边界 | 只含进程调度，不含 GPU/渲染抖动；默认限 10 s |
+| `realtime --uncapped` | 实测频率/占空比（不设帧率上限） | 帧数随机器负载变化，不适合可复现 CI |
+
+```text
+engine-editor-cli validate --realtime --frames 240            # wall-clock
+engine-editor-cli validate --fps 240 --frames 2400            # fake-time 高频复测
+flyvibing-node-editor simulate --scene X --mode realtime --seconds 3
+flyvibing-node-editor simulate --scene X --nodes @flicker_9hz,@flicker_11hz \
+  --mode realtime --uncapped --seconds 7                       # 实测闪烁频率
+python -m flyvibing_node_editor.node_graph_validator X --fps 240 --seconds 3
+python -m flyvibing_node_editor.node_graph_validator X --real-time --seconds 3
+PlayerEntry X --dry-run --fps 240 --seconds 3                 # --realtime 同理
+```
+
+- 不要用 60 fps fake 干跑的时序结论替代真实标定；高频闪烁/短脉冲必须用 `--fps 240`+ 或 `realtime` 复测。
+- 渲染级抖动（GPU/合成/窗口）只能 PIE + probe/光电标定；`realtime` 干跑也无法覆盖。
+- 边界注入：`simulate --set-prop @node.key=value` 改常量/时间参数；`--stub @node.pin=value`
+  注入数据引脚（output=强制生产者，input=覆盖边界读取）。静态注入贯穿整段模拟，适合分支/门控验证。

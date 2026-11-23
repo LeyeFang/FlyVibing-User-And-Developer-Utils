@@ -1,5 +1,5 @@
 """图谱编辑 ops — 在已有节点图上做增量修改（link / unlink / set_props / add_node / remove_node /
-set_alias / set_description / add_group / set_group / merge_group / ungroup_group / delete_group）。
+set_alias / set_description / set_pos / set_group_meta / add_group / set_group / merge_group / ungroup_group / delete_group）。
 
 与 bench 的 patch DSL 同一语义；供 CLI `apply-ops` 与 agent 的 stepwise 编辑使用。
 纯内存操作：返回新的 scene dict，不写文件。
@@ -11,8 +11,9 @@ import copy
 import re
 
 _OPS = ("link", "unlink", "set_props", "add_node", "remove_node",
-        "set_alias", "set_description", "add_group", "set_group",
-        "merge_group", "ungroup_group", "delete_group")
+        "set_alias", "set_description", "set_pos", "set_group_meta",
+        "add_group", "set_group", "merge_group", "ungroup_group",
+        "delete_group")
 
 _ALIAS_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -180,9 +181,15 @@ def apply_ops(scene: dict, ops) -> dict:
                 if persistent.lower() in _alias_map(scene):
                     errors.append(f"op[{i}] add_node: duplicate alias {persistent!r}")
                     continue
+            pos = op.get("pos", op.get("position", [0.0, 0.0]))
+            if (not isinstance(pos, (list, tuple)) or len(pos) != 2
+                    or not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                               for v in pos)):
+                errors.append(f"op[{i}] add_node: pos must be [x, y]")
+                continue
             nd = {
                 "node_type": type_name,
-                "pos": [0.0, 0.0],
+                "pos": [float(pos[0]), float(pos[1])],
                 "props": props,
                 "pin_ids": pin_ids,
             }
@@ -239,6 +246,47 @@ def apply_ops(scene: dict, ops) -> dict:
                 continue
             nd = _graph(scene)["nodes"][str(nid)]
             nd["props"] = {**(nd.get("props") or {}), **dict(op.get("props") or {})}
+            continue
+
+        if kind == "set_pos":
+            nid = _resolve_node(scene, op.get("node"), symbols)
+            if nid is None:
+                errors.append(f"op[{i}] set_pos: unknown node {op.get('node')!r}")
+                continue
+            pos = op.get("pos", op.get("position"))
+            if (not isinstance(pos, (list, tuple)) or len(pos) != 2
+                    or not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                               for v in pos)):
+                errors.append(f"op[{i}] set_pos: pos must be [x, y]")
+                continue
+            _graph(scene)["nodes"][str(nid)]["pos"] = [float(pos[0]), float(pos[1])]
+            continue
+
+        if kind == "set_group_meta":
+            from flyvibing_node_editor.node_groups import _resolve_group
+            gid, group = _resolve_group(scene, op.get("group") or op.get("gid"))
+            if group is None:
+                errors.append(f"op[{i}] set_group_meta: unknown group {op.get('group')!r}")
+                continue
+            touched = False
+            for key in ("title", "description"):
+                if key not in op:
+                    continue
+                touched = True
+                value = op.get(key)
+                if value in (None, ""):
+                    group.pop(key, None)
+                else:
+                    group[key] = str(value)
+            if "params" in op:
+                touched = True
+                params = op.get("params")
+                if not isinstance(params, dict):
+                    errors.append(f"op[{i}] set_group_meta: params must be an object")
+                    continue
+                group.setdefault("params", {}).update(params)
+            if not touched:
+                errors.append(f"op[{i}] set_group_meta: nothing to update")
             continue
 
         if kind == "remove_node":

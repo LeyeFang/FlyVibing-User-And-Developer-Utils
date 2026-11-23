@@ -13,12 +13,14 @@ description: "构建/修改 .scene 里的实验节点图（离线通道 — 不�
 > 最低配: `OnGameStart → EntitySpawn(template=<实体名>)`。
 > 完成建图后必须过引擎校验（见 §2 末尾），有实体但无图的情况 `sim.play` 会返回 warning 提醒。
 
-## 0. 通道选择
+<!-- flyvibing:onboarding:begin -->
+## 0. 通道与规模（由 `agent/onboarding.md` + 注册表生成 — 勿手改）
 
-| 通道 | 常驻成本 | 何时用 |
-|---|---|---|
-| `python -m flyvibing_node_editor.cli`（终端） | **0** | 默认首选（任意终端型 agent） |
-| MCP `node-graph-editor`（4 工具） | ~1.5k 字符 schema | 无终端的环境 |
+- **CLI 优先**：`flyvibing-node-editor schema` / `rules <section>`；任意终端型 agent 可用，未使用时常驻成本为 0。
+- **MCP 可选**：`node-graph-editor`（4 工具）；无终端环境再用。
+- **规模**：19 个 CLI 命令；图数据契约 `graph-query/v1` / `graph-patch/v1` / `graph-sim/v1`。
+- **纪律**：规则永远先看目录、按节取；图 JSON 落盘后局部读取。
+<!-- flyvibing:onboarding:end -->
 
 相对路径均基于**引擎仓库根**（部署副本里 = 项目根）。
 

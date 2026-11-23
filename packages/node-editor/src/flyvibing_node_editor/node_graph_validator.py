@@ -8,8 +8,9 @@ Node Graph Validator — 节点图校验的**单一实现**（离线 CLI 与在�
            Application.Core.NodeGraph.validation.dry_run.run_dry_run（单一实现）
 
 消费方（同源）:
-  离线: python -m flyvibing_node_editor.node_graph_validator <scene> [--frames N] 
-        [--seconds T --dt DT]   # 绝对 fake-time（T/DT 帧数）
+  离线: python -m flyvibing_node_editor.node_graph_validator <scene> [--frames N]
+        [--seconds T --dt DT | --fps F]      # 绝对时长/步长
+        [--real-time [--allow-long]]         # wall-clock 实速（暴露调度抖动）
         flyvibing_node_editor.cli / GraphBuilder.validate / apply_graph --validate
   在线: Application/Core/NodeGraph/validation/checks.static_check_graph（薄适配器）
         ← graph.validate.*（LiveCommandServer）/ Node Editor Validate 按钮 / PlayerEntry --dry-run
@@ -573,23 +574,31 @@ def dry_run_simulation(
     real_time: bool = False,
     target_fps: float = 0.0,
     dt: float = 0.0,
+    allow_long: bool = False,
 ) -> dict:
     """L2: 干跑模拟 — 委托引擎 `validation.dry_run.run_dry_run`（单一实现）。
 
-    保留旧返回结构以兼容 GraphBuilder / apply_graph:
-        {frames_simulated, total_events, events_by_type, errors, perf}
+    返回旧字段 + `timebase`（mode/fps/frames/modes/hint/warning）：
+        {frames_simulated, total_events, events_by_type, errors, perf, timebase}
 
-    `real_time` / `target_fps` 仅为旧签名兼容而保留，已无效果 — 校验一致性
-    要求确定性 fake-time；性能测量请用引擎侧校验报告的 timing 字段。
-    `dt` 可指定 fake-time 步长（秒）；0 = 引擎默认 1/60。
+    `real_time=True` 走 wall-clock 实速（暴露调度抖动）；`target_fps` 在未显式
+    指定 `dt` 时换算步长；`dt` 可指定步长（秒）；0 = 引擎默认 1/60。
     """
     from flyvibing_node_editor.engine_path import ensure_engine_importable
 
     ensure_engine_importable()
     from Application.Core.NodeGraph.validation.dry_run import run_dry_run
 
-    dr = run_dry_run(scene_data, frames=int(max_frames),
-                     dt=(float(dt) if dt and float(dt) > 0 else 1.0 / 60.0))
+    step = float(dt) if dt and float(dt) > 0 else 0.0
+    if not step and target_fps and target_fps > 0:
+        step = 1.0 / float(target_fps)
+    dr = run_dry_run(
+        scene_data,
+        frames=int(max_frames),
+        dt=(step if step > 0 else 1.0 / 60.0),
+        realtime=bool(real_time),
+        allow_long=bool(allow_long),
+    )
     events = list(dr.get("log") or [])
     if verbose:
         for e in events:
@@ -600,6 +609,7 @@ def dry_run_simulation(
         "events_by_type": dict(dr.get("events_by_type") or {}),
         "errors": list(dr.get("errors") or []),
         "perf": None,
+        "timebase": dr.get("timebase") or {},
     }
 
 
@@ -626,10 +636,12 @@ def main() -> int:
                         help="Print per-node dry-run traces")
     parser.add_argument("--static-only", "-s", action="store_true",
                         help="Static check only (skip dry-run even if --frames is set)")
-    parser.add_argument("--real-time", "-r", action="store_true",
-                        help=argparse.SUPPRESS)
+    parser.add_argument("--real-time", "-r", dest="real_time", action="store_true",
+                        help="Wall-clock 实速干跑（暴露调度抖动; 默认 fake-time）")
+    parser.add_argument("--allow-long", action="store_true",
+                        help="允许 realtime 超过 10 s（默认拒绝）")
     parser.add_argument("--fps", type=float, default=0.0,
-                        help=argparse.SUPPRESS)
+                        help="按 fps 指定步长（未显式 --dt 时生效）")
     args = parser.parse_args()
 
     scene_path = args.scene_path
@@ -660,24 +672,31 @@ def main() -> int:
 
     dry_run_errors: list[str] = []
     frames = int(args.frames)
-    dt = float(args.dt) if args.dt and args.dt > 0 else 1.0 / 60.0
+    dt = float(args.dt) if args.dt and args.dt > 0 else 0.0
+    if dt <= 0 and args.fps and args.fps > 0:
+        dt = 1.0 / float(args.fps)
+    if dt <= 0:
+        dt = 1.0 / 60.0
     if args.seconds > 0:
-        if dt <= 0:
-            print("ERROR: --dt must be > 0 when --seconds is used")
-            return 2
         frames = max(1, int(args.seconds / dt + 0.999999))
     if frames > 0 and not args.static_only:
         result = dry_run_simulation(
-            scene_data, max_frames=frames, verbose=args.verbose, dt=dt)
+            scene_data, max_frames=frames, verbose=args.verbose, dt=dt,
+            real_time=bool(args.real_time), allow_long=bool(args.allow_long))
         dry_run_errors = result.get("errors", [])
         if dry_run_errors:
             print(f"\n  Dry-run errors ({len(dry_run_errors)}):")
             for err in dry_run_errors:
                 print(f"    x {err}")
         else:
+            tb = result.get("timebase") or {}
             print(f"\n  Dry-run completed — {result['frames_simulated']} frames "
-                  f"({result['frames_simulated'] * dt:.3f} s @ dt={dt:.9f}), "
-                  f"{result['total_events']} side-effect events")
+                  f"({tb.get('duration', result['frames_simulated'] * dt):.3f} s @ dt={dt:.9f}, "
+                  f"{tb.get('mode', 'fake')}), {result['total_events']} side-effect events")
+            print(f"  Timebase: {tb.get('fps')} fps target; modes={tb.get('modes')}")
+            print(f"  {tb.get('hint', '')}")
+            if tb.get("warning"):
+                print(f"  ! {tb['warning']}")
 
     total_errors = len(static_errors) + len(dry_run_errors)
     print(f"\n{'=' * 60}")
